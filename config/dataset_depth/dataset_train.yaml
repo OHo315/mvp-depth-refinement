@@ -1,0 +1,20 @@
+dataset:
+  train:
+    name: mixed
+    # prob_ls: [0.9, 0.1]
+    prob_ls: [1.0]
+    dataset_list:
+    - name: hypersim_depth
+      disp_name: hypersim_depth_train
+      dir: hypersim_processed/train
+      filenames: data/hypersim_processed/train/filename_list_train.txt
+      resize_to_hw:
+      - 480
+      - 640
+    # - name: vkitti_depth
+    #   disp_name: vkitti_depth_train
+    #   # dir: vkitti/vkitti.tar
+    #   dir: vkitti
+    #   filenames: data_split/vkitti_depth/vkitti_train.txt
+    #   kitti_bm_crop: true
+    #   valid_mask_crop: null

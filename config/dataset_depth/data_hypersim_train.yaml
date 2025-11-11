@@ -1,0 +1,4 @@
+name: hypersim_depth
+disp_name: hypersim_depth_train
+dir: hypersim_processed/train
+filenames: data/hypersim_processed/train/filename_list_train.txt

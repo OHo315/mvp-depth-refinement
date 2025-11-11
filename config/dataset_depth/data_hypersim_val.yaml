@@ -1,0 +1,4 @@
+name: hypersim_depth
+disp_name: hypersim_depth_val
+dir: hypersim_processed/val
+filenames: data/hypersim_processed/val/filename_list_val.txt

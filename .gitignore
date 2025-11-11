@@ -1,0 +1,7 @@
+__pycache__
+env
+*.ipynb
+data
+data2
+output
+
