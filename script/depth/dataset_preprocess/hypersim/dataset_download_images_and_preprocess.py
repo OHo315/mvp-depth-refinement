@@ -558,6 +558,5 @@ for url in urls_to_download:
     )
     # Clean up
     subprocess.run(["rm", "-rf", f"{BASE_DATA_DIR}/hypersim/{filename}"])
-    subprocess.run(["rm", "-rf", f"{BASE_DATA_DIR}/hypersim/{filename}.zip"])
 
 print("[HYPERSIM: DATASET_DOWNLOAD_IMAGES] Finished.")
