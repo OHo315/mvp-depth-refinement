@@ -11,7 +11,10 @@ echo "Fetching depth anything repo..."
 git clone https://github.com/LiheYoung/Depth-Anything.git
 cd Depth-Anything
 python3 -m venv env
+sed -i "/opencv-python/d" requirements.txt # Remove dependency which does not work in docker.
+echo "opencv-python-headless" >> requirements.txt # Replace dependency with something that does work in docker.
 source env/bin/activate
+
 pip install -r requirements.txt
 
 echo "Fetching depth anything checkpoints..."
