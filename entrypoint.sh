@@ -13,7 +13,7 @@ bash ./setup.sh
 source env/bin/activate
 
 echo "step 2: dataset fetch"
-bash ./script/data_fetch/data-fetch-small.sh
+bash ./script/data_fetch/data-fetch.sh
 
 echo "set 3: depth anything"
 bash ./script/external_models/run-depth-anything.sh
@@ -22,7 +22,10 @@ bash ./script/external_models/run-depth-anything.sh
 # bash ./script/external_models/run-ppd.sh
 
 # Setup vast cli tool
-vastai set api-key $CONTAINER_API_KEY # note that CONTAINER_API_KEY gets injected into container by vast.
+CONTAINER_API_KEY="$(cat ~/.vast_api_key)"
+CONTAINER_ID="$(cat ~/.vast_container_label)"
+
+vastai set api-key $CONTAINER_API_KEY 
 
 vastai stop instance $CONTAINER_ID
 

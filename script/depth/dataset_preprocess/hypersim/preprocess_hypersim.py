@@ -65,7 +65,7 @@ if "__main__" == __name__:
     # %%
     for split in ["train", "val", "test"]:
         split_output_dir = os.path.join(output_dir, split)
-        os.makedirs(split_output_dir)
+        os.makedirs(split_output_dir, exist_ok=True)
 
         split_meta_df = meta_df[meta_df.split_partition_name == split].copy()
         split_meta_df["rgb_path"] = None
