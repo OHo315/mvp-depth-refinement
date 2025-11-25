@@ -2,4 +2,5 @@
 
 bash ./script/data_fetch/hypersim-small.sh
 bash ./script/data_fetch/nyu.sh
+bash ./script/data_fetch/middlebury.sh
 
