@@ -1,6 +1,6 @@
 #!/bin/bash
 
-cd Depth-Anything
+pushd submodules/Depth-Anything
 source env/bin/activate
 
 ######################
@@ -21,8 +21,8 @@ for SPLIT in train val test; do
     done
 done
 
-echo "Zipping depth_anything processed hypersim..."
-zip -r "$BASE_DATA_DIR/depth_anything_hypersim.zip" "$BASE_HYPERSIM_DATASET_DIR"
+echo "Symlinking depth_anything processed hypersim..."
+ln -sf "$BASE_HYPERSIM_DATASET_DIR/" "$BASE_DATA_DIR/depth_anything_hypersim"
 
 ######################
 
@@ -61,5 +61,3 @@ rm -rf $LABELS_DIR
 
 echo "Zipping depth_anything processed middlebury..."
 zip -r "$BASE_DATA_DIR/depth_anything_middlebury.zip" "$BASE_MIDDLEBURY_DATASET_DIR"
-
-

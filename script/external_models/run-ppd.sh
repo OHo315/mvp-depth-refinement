@@ -1,9 +1,10 @@
 #!/bin/bash
 
-cd pixel-perfect-depth 
+pushd submodules/pixel-perfect-depth 
+source env/bin/activate
 
 # Define some dir vars 
-BASE_DATASET_DIR=../data/hypersim_processed
+BASE_DATASET_DIR=../../data/hypersim_processed
 
 TRAIN_DIR=$BASE_DATASET_DIR/train
 TRAIN_INPUT_DIR=$BASE_DATASET_DIR/pixel_perfect_depth/train_in
@@ -44,8 +45,9 @@ BASE_ZIPPED_OUTPUT_DIR=../data/pixel_perfect_depth/hypersim
 mkdir -p $BASE_ZIPPED_OUTPUT_DIR
 
 echo "Zipping pixel_perfect_depth datasplits..."
-zip -r $BASE_ZIPPED_OUTPUT_DIR/train.zip $TRAIN_OUTPUT_DIR 
-zip -r $BASE_ZIPPED_OUTPUT_DIR/val.zip $VAL_OUTPUT_DIR 
-zip -r $BASE_ZIPPED_OUTPUT_DIR/test.zip $TEST_OUTPUT_DIR
+ln -sf $TRAIN_OUTPUT_DIR $BASE_ZIPPED_OUTPUT_DIR/train
+ln -sf $VAL_OUTPUT_DIR $BASE_ZIPPED_OUTPUT_DIR/val
+ln -sf $TEST_OUTPUT_DIR $BASE_ZIPPED_OUTPUT_DIR/test
 
+popd
 
