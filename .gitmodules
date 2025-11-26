@@ -7,3 +7,6 @@
 [submodule "submodules/Depth-Anything"]
 	path = submodules/Depth-Anything
 	url = https://github.com/LiheYoung/Depth-Anything.git
+[submodule "submodules/UniDepth"]
+	path = submodules/UniDepth
+	url = https://github.com/lpiccinelli-eth/UniDepth
