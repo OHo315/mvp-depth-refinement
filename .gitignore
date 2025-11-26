@@ -1,7 +1,6 @@
 __pycache__
 env
 *.ipynb
-*.swp
 data
 data2
 output
