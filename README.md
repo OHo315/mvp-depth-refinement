@@ -1,5 +1,16 @@
 # MVP-DEPTH-ESTIMATION-WITH-REFINEMENT
 
+### Setup and visualizing outputs
+
+```bash
+source ./setup.sh
+source scripts/external_models/run-depth-anything.sh
+source scripts/external_models/run-depth-v2.sh
+source scripts/external_models/run-ppd.sh
+source scripts/external_models/run-sharpdepth.sh
+```
+
+
 
 ### Docker container setup
 
