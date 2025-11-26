@@ -1,9 +1,6 @@
 [submodule "submodules/pixel-perfect-depth"]
 	path = submodules/pixel-perfect-depth
 	url = https://github.com/gangweix/pixel-perfect-depth
-[submodule "submodules/Depth-Anything-V2"]
-	path = submodules/Depth-Anything-V2
-	url = https://github.com/DepthAnything/Depth-Anything-V2
 [submodule "submodules/SharpDepth"]
 	path = submodules/SharpDepth
 	url = https://github.com/Qualcomm-AI-research/SharpDepth
