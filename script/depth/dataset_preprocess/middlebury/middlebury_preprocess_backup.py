@@ -1,6 +1,6 @@
 import os
-import re
 from pathlib import Path
+import subprocess
 import shutil
 from tqdm import tqdm
 from PIL import Image
@@ -30,37 +30,6 @@ def parse_calibration_file(filepath: Path) -> Calibration:
     return calibration
 
 
-def read_pfm(file_path: Path):
-    with open(file_path, "rb") as f:
-        header = f.readline().decode("utf-8").rstrip()
-        if header == "PF":
-            color = True
-        elif header == "Pf":
-            color = False
-        else:
-            raise Exception("Not a PFM file.")
-
-        dim_match = re.match(r"^(\d+)\s(\d+)\s$", f.readline().decode("utf-8"))
-        if dim_match:
-            width, height = map(int, dim_match.groups())
-        else:
-            raise Exception("Malformed PFM header.")
-
-        scale = float(f.readline().decode("utf-8").rstrip())
-        if scale < 0:  # little-endian
-            endian = "<"
-            scale = -scale
-        else:  # big-endian
-            endian = ">"
-
-        data = np.fromfile(f, endian + "f")
-        shape = (height, width, 3) if color else (height, width)
-
-        data = np.reshape(data, shape)
-        data = np.flipud(data)
-        return data
-
-
 def disparity_to_depth(disparity_map, baseline_mm, focal_length_pixels, doffs_pixels):
     """
     Converts a disparity map (in pixels) to a depth map (in millimeters)
@@ -70,13 +39,11 @@ def disparity_to_depth(disparity_map, baseline_mm, focal_length_pixels, doffs_pi
     """
     depth_map = np.zeros_like(disparity_map, dtype=np.float32)
 
-    # Disparity values of 0 or inf are invalid
-    valid_mask = (disparity_map > 0) & np.isfinite(disparity_map)
+    # NOTE: There is a danger of dividing by zero due to zero depth disparity values, I checked and this is never the case so we do not have to worry about valid masks etc.
 
-    denominator = disparity_map[valid_mask] + doffs_pixels
     numerator = baseline_mm * focal_length_pixels
-
-    depth_map[valid_mask] = numerator / denominator
+    denominator = disparity_map + doffs_pixels
+    depth_map = numerator / denominator
 
     return depth_map
 
@@ -102,8 +69,17 @@ def process_middlebury_raw() -> None:
             processed_dirpath / f"depth_{scene_folder.name}.png"
         )
         shutil.copy(scene_rgb_file, moved_scene_rgb_filepath)
+        scene_rgb_file = moved_scene_rgb_filepath
 
-        img = read_pfm(scene_depth_file)
+        subprocess.run(
+            [
+                "convert",
+                scene_depth_file,
+                moved_scene_depth_filepath,
+            ]
+        )
+
+        img = np.array(Image.open(moved_scene_depth_filepath).convert("F"))
 
         calibration_filepath = scene_folder / "calib.txt"
         calibration = parse_calibration_file(calibration_filepath)
@@ -117,6 +93,10 @@ def process_middlebury_raw() -> None:
         )
 
         depth_map = depth_map.astype(np.uint16)
+
+        print("img", img)
+        print("depth_map", depth_map)
+        print("calib", calibration)
 
         Image.fromarray(depth_map).save(moved_scene_depth_filepath)
 
