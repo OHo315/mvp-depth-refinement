@@ -20,7 +20,7 @@ from torchvision.transforms import InterpolationMode
 from torchvision.transforms.functional import pil_to_tensor, resize
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, Callable
 
 from ppd_sharpdepth.sharpdepth.util.image_util import (
     chw2hwc,
@@ -46,9 +46,9 @@ class SharpDepthOutput(BaseOutput):
     """
 
     depth_np: np.ndarray
-    depth_uni: np.ndarray
+    depth_base_np: np.ndarray
     depth_colored: Union[None, Image.Image]
-    unidepth_colored: Union[None, np.ndarray]
+    depth_base_colored: Union[None, np.ndarray]
     pred_mask: Union[None, Image.Image]
 
 
@@ -128,7 +128,7 @@ class SharpDepthPipeline(DiffusionPipeline):
     def __call__(
         self,
         input_image: Union[Image.Image, torch.Tensor],
-        unidepth,
+        base_estimator_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
         intrinsics=None,
         denoising_steps: Optional[int] = None,
         processing_res: Optional[int] = None,
@@ -213,18 +213,17 @@ class SharpDepthPipeline(DiffusionPipeline):
 
         # Normalize rgb values
 
-        predictions = unidepth.infer((image*255).squeeze().int())
-        disp_unidepth = predictions['depth']
+        depth_base = base_estimator_fn(image, rgb)
        
         rgb_norm = image * 2.0 - 1.0  #  [0, 255] -> [-1, 1]
         rgb_norm = rgb_norm.to(self.dtype).to(self.device)
 
 
 
-        normalize_obj = self.depth_normalizer(disp_unidepth)
-        norm_disp_unidepth = normalize_obj['norm_depth'].to(dtype=self.vae.dtype)
+        normalize_obj = self.depth_normalizer(depth_base)
+        norm_disp_base = normalize_obj['norm_depth'].to(dtype=self.vae.dtype)
 
-        unidepth_latent = self.encode_rgb(norm_disp_unidepth.to(self.vae.dtype).repeat(1,3,1,1))
+        base_latent = self.encode_rgb(norm_disp_base.to(self.vae.dtype).repeat(1,3,1,1))
         rgb_latent = self.encode_rgb(rgb_norm.to(self.vae.dtype))
         lotus_timesteps = torch.ones((rgb_latent.shape[0],), device=self.device) * (self.scheduler.config.num_train_timesteps - 1)
         lotus_timesteps = lotus_timesteps.long()
@@ -242,15 +241,15 @@ class SharpDepthPipeline(DiffusionPipeline):
         
         # --------------------------------- 
         # calculate difference
-        l1_error            = torch.abs(lotus_depth -  norm_disp_unidepth)
+        l1_error            = torch.abs(lotus_depth -  norm_disp_base)
         l1_error            = l1_error/l1_error.max()
         l1_error            = l1_error.clip(0, 1)
        
         latent_mask = torch.nn.functional.interpolate(l1_error, scale_factor=1/8)
 
-        noise                   = torch.randn_like(unidepth_latent).to(self.vae.device)
+        noise                   = torch.randn_like(base_latent).to(self.vae.device)
         noisy_lotus_latent      = self.scheduler.add_noise(lotus_pred, noise, lotus_timesteps)
-        noisy_latent            = noisy_lotus_latent * latent_mask + unidepth_latent * (1 - latent_mask)
+        noisy_latent            = noisy_lotus_latent * latent_mask + base_latent * (1 - latent_mask)
         student_input           = torch.cat([rgb_latent, noisy_latent], dim=1)
 
         pred_latent     = self.unet(student_input, lotus_timesteps.to(self.vae.dtype), encoder_hidden_states=self.empty_text_embed, class_labels=task_emb).sample
@@ -262,22 +261,22 @@ class SharpDepthPipeline(DiffusionPipeline):
 
         
         final_pred = self.image_processor.unpad_image(lotus_depth, padding)  # [N*E,1,PH,PW]
-        unidepth_pred = self.image_processor.unpad_image(disp_unidepth, padding)  # [N*E,1,PH,PW]
+        base_pred = self.image_processor.unpad_image(depth_base, padding)  # [N*E,1,PH,PW]
         l1_error = self.image_processor.unpad_image(l1_error, padding)  # [N*E,1,PH,PW]
         
         final_pred = self.image_processor.resize_antialias(final_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
-        unidepth_pred = self.image_processor.resize_antialias(unidepth_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+        base_pred = self.image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
         l1_error = self.image_processor.resize_antialias(l1_error, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
 
         # Convert to numpy
         final_pred = final_pred.squeeze().float().cpu().numpy()
-        unidepth_pred = unidepth_pred.squeeze().float().cpu().numpy()
+        base_pred = base_pred.squeeze().float().cpu().numpy()
         pred_mask = l1_error.squeeze().float().cpu().numpy()
 
         valid_mask = (1 - pred_mask) > 0.5
         
         final_pred, scale, shift = align_depth_least_square(
-                                                        gt_arr=unidepth_pred,
+                                                        gt_arr=base_pred,
                                                         pred_arr=final_pred,
                                                         valid_mask_arr=valid_mask,
                                                         return_scale_shift=True,
@@ -287,15 +286,15 @@ class SharpDepthPipeline(DiffusionPipeline):
         
         # Colorize
         if color_map is not None:
-            depth_colored = colorize_depth_maps(final_pred, 0, unidepth_pred.max(), cmap=color_map).squeeze()
+            depth_colored = colorize_depth_maps(final_pred, 0, base_pred.max(), cmap=color_map).squeeze()
             depth_colored = (depth_colored * 255).astype(np.uint8)
             depth_colored_hwc = chw2hwc(depth_colored)
             depth_colored_img = Image.fromarray(depth_colored_hwc)
 
-            depth_colored = colorize_depth_maps(unidepth_pred, 0, unidepth_pred.max(), cmap=color_map).squeeze()
+            depth_colored = colorize_depth_maps(base_pred, 0, base_pred.max(), cmap=color_map).squeeze()
             depth_colored = (depth_colored * 255).astype(np.uint8)
             depth_colored_hwc = chw2hwc(depth_colored)
-            unidepth_colored_img = Image.fromarray(depth_colored_hwc)
+            depth_base_colored_img = Image.fromarray(depth_colored_hwc)
 
             depth_colored = colorize_depth_maps(pred_mask, 0, 1, cmap="coolwarm").squeeze() 
             depth_colored = (depth_colored * 255).astype(np.uint8)
@@ -304,14 +303,14 @@ class SharpDepthPipeline(DiffusionPipeline):
 
         else:
             depth_colored_img = None
-            unidepth_colored_img = None
+            depth_base_colored_img = None
             pred_mask_img = None
 
         return SharpDepthOutput(
             depth_np=final_pred,
-            depth_uni=unidepth_pred,
+            depth_base_np=base_pred,
             depth_colored=depth_colored_img,
-            unidepth_colored=unidepth_colored_img,
+            depth_base_colored=depth_base_colored_img,
             pred_mask=pred_mask_img,
         )
 
