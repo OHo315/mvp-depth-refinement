@@ -89,9 +89,22 @@ popd
 
 pushd submodules/UniDepth
 
-echo "Installing UniDepth"
+echo "Installing UniDepth in SharpDepth environment"
 
 source ../SharpDepth/env/bin/activate
+
+pip install -v -e . --no-deps
+
+echo "Installing a custom op used by UniDepth. This will build some C++ code"
+cd unidepth/ops/knn
+python setup.py build install
+
+popd
+
+source env/bin/activate
+pushd submodules/UniDepth
+
+echo "Installing UniDepth in top-level environment"
 
 pip install -v -e . --no-deps
 

@@ -9,3 +9,7 @@ torchvision
 transformers>=4.32.1
 pandas
 vastai
+einops
+pypng
+xformers
+timm
