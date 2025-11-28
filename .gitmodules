@@ -1,12 +1,16 @@
 [submodule "submodules/pixel-perfect-depth"]
 	path = submodules/pixel-perfect-depth
 	url = https://github.com/andrew-healey/pixel-perfect-depth
+	branch = main
 [submodule "submodules/SharpDepth"]
 	path = submodules/SharpDepth
 	url = https://github.com/andrew-healey/SharpDepth
+	branch = main
 [submodule "submodules/Depth-Anything"]
 	path = submodules/Depth-Anything
 	url = https://github.com/andrew-healey/Depth-Anything.git
+	branch = main
 [submodule "submodules/UniDepth"]
 	path = submodules/UniDepth
 	url = https://github.com/andrew-healey/UniDepth
+	branch = main
