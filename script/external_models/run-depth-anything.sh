@@ -5,7 +5,7 @@ source env/bin/activate
 
 ######################
 
-BASE_HYPERSIM_DATASET_DIR=../data/hypersim_processed
+BASE_HYPERSIM_DATASET_DIR=../../data/hypersim_processed
 
 for SPLIT in train val test; do
     SPLIT_DIR="$BASE_HYPERSIM_DATASET_DIR/$SPLIT"

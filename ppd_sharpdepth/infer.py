@@ -159,11 +159,13 @@ if "__main__" == __name__:
             return depth_resized.unsqueeze(0)
 
 
-            # for reference, depth_anything has this interface:
-            # Input to depth_anything. shape: torch.Size([1, 3, 518, 686]), std: 0.13804294168949127, mean: -1.7824370861053467, dtype: torch.float32
-            # Output from depth_anything. shape: torch.Size([1, 518, 686]), std: 2.3302955627441406, mean: 5.578943729400635, dtype: torch.float32
-
             raise NotImplementedError("Depth Anything is not implemented yet")
+        
+        # sanity check (GOOD! Matches the stats in submodules/Depth-Anything/run.py):
+        # filename:  submodules/SharpDepth/assets/in-the-wild_example/00.jpg
+        # Input to depth_anything. shape: torch.Size([1, 3, 518, 546]), std: 1.4334324598312378, mean: -0.45399439334869385, dtype: torch.float32
+        # Output from depth_anything. shape: torch.Size([1, 518, 546]), std: 7.174661636352539, mean: 10.526067733764648, dtype: torch.float32
+        
     else:
         raise ValueError(f"Invalid base model: {args.base_model}")
 
@@ -173,6 +175,7 @@ if "__main__" == __name__:
         for batch in tqdm(imgs):
             # Read input image
             rgb = Image.open(os.path.join(input_dir, batch))
+            print("filename: ", os.path.join(input_dir, batch))
             out = pipeline(rgb, base_estimator_fn, processing_res=768, denoising_steps=1)
             depth_colored = out.depth_colored
             unidepth_colored = out.depth_base_colored
