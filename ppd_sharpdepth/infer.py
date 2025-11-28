@@ -177,8 +177,8 @@ if "__main__" == __name__:
         model.load_state_dict(torch.load(ckpt_path, map_location='cpu'), strict=False)
         model = model.to(device).eval()
 
-        def base_estimator_fn(_marigold_preprocessed_image_1chw, raw_image_1chw):
-            H, W = raw_image_1chw.squeeze(0).shape[1:3]
+        def base_estimator_fn(marigold_preprocessed_image_1chw, raw_image_1chw):
+            H, W = marigold_preprocessed_image_1chw.squeeze(0).shape[1:3]
             raw_image_hwc = raw_image_1chw.squeeze(0).permute(1, 2, 0).numpy()
             depth_raw_11hw, _ = model.infer_image(raw_image_hwc)
             depth_11hw = F.interpolate(depth_raw_11hw, size=(H, W), mode='bilinear', align_corners=False)
