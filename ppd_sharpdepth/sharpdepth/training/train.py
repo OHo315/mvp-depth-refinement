@@ -1012,7 +1012,7 @@ if "__main__" == __name__:
                                         depth_pred = torch.from_numpy(out.depth_np).to(
                                             accelerator.device
                                         )
-                                        depth_uni = torch.from_numpy(out.depth_base_np).to(
+                                        depth_uni = torch.from_numpy(out.depth_uni).to(
                                             accelerator.device
                                         )
 
@@ -1057,7 +1057,7 @@ if "__main__" == __name__:
                                                 f"vis_pred_depth_{loader_idx}_{vis_idx}_{error.mean()}.jpg",
                                             )
                                         )
-                                        out.depth_base_colored.save(
+                                        out.unidepth_colored.save(
                                             os.path.join(
                                                 saved_dir,
                                                 f"vis_unidepth_{loader_idx}_{vis_idx}_{error_uni.mean()}.jpg",

@@ -13,3 +13,4 @@ einops
 pypng
 xformers
 timm
+ema-pytorch

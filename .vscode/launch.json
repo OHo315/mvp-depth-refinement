@@ -8,19 +8,19 @@
       "name": "Train SharpDepth",
       "type": "debugpy",
       "request": "launch",
-      "python": "${workspaceFolder}/submodules/SharpDepth/env/bin/python",
-      "program": "${workspaceFolder}/submodules/SharpDepth/src/sharpdepth/training/train.py",
+      "python": "${workspaceFolder}/env/bin/python",
+      "program": "${workspaceFolder}/ppd_sharpdepth/sharpdepth/training/train.py",
       "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}/submodules/SharpDepth",
+      "cwd": "${workspaceFolder}",
       "env": {
-        "PYTHONPATH": "${workspaceFolder}/submodules/SharpDepth/src:${env:PYTHONPATH}"
+        "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}"
       },
       "args": [
         "--depth_weight", "0.4",
         "--base_ckpt_dir", "jingheya/lotus-depth-g-v1-0",
         "--student_ckpt_dir", "jingheya/lotus-depth-g-v1-0",
         "--add_datetime_prefix",
-        "--report_to", "tensorboard",
+        "--report_to", "wandb",
         "--mixed_precision", "bf16",
         "--seed", "42",
         "--enable_xformers_memory_efficient_attention",
@@ -37,9 +37,9 @@
         "--gradient_accumulation_steps", "8",
         "--num_train_epochs", "6",
         "--use_ema",
-        "--base_data_dir", "${workspaceFolder}/submodules/SharpDepth/data/",
-        "--config", "${workspaceFolder}/submodules/SharpDepth/config/train_marigold_depth.yaml",
-        "--output_dir", "${workspaceFolder}/submodules/SharpDepth/train_output/"
+        "--base_data_dir", "${workspaceFolder}/data/",
+        "--config", "${workspaceFolder}/config/train_marigold_depth.yaml",
+        "--output_dir", "${workspaceFolder}/train_output/"
       ]
     },
   ]

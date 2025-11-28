@@ -1,7 +1,8 @@
 __pycache__
-env
+/env
 *.ipynb
-data
-data2
-output
-viz/
+/data
+/data2
+/output
+/viz
+/train_output
