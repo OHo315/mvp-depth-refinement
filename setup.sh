@@ -21,12 +21,6 @@ pip install -qr requirements++.txt -r requirements+.txt -r requirements.txt
 
 pushd submodules/Depth-Anything
 
-cat > .gitignore << 'EOF'
-env/
-checkpoints/
-EOF
-
-
 python3 -m venv env
 echo "Installing Depth-Anything deps"
 source env/bin/activate
