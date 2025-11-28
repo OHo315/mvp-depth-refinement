@@ -29,7 +29,7 @@
         "--scale_lr",
         "--lr_scheduler", "cosine",
         "--lr_warmup_steps", "200",
-        "--tracker_project_name", "main",
+        "--tracker_project_name", "sharpdepth_train",
         "--set_grads_to_none",
         "--checkpointing_steps", "5000",
         "--validation_steps", "2000",

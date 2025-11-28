@@ -722,8 +722,15 @@ if "__main__" == __name__:
     # The trackers initializes automatically on the main process.
     # -------------------- Initializes tracker --------------------
     if accelerator.is_main_process:
+
+        init_kwargs = {
+            "wandb": {
+                "entity": cfg.wandb.entity,
+            }
+        } if args.report_to == "wandb" else {}
+
         tracker_config = dict(vars(args))
-        accelerator.init_trackers(args.tracker_project_name, config=tracker_config)
+        accelerator.init_trackers(args.tracker_project_name, config=tracker_config, init_kwargs=init_kwargs)
     # ---------------------------------------------------------------------
 
     # -------------------- Trainer --------------------
