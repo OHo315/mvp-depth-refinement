@@ -4,17 +4,23 @@
 
 ```bash
 source ./setup.sh
-source scripts/external_models/run-depth-anything.sh
-source scripts/external_models/run-depth-v2.sh
-source scripts/external_models/run-ppd.sh
-source scripts/external_models/run-sharpdepth.sh
+source ./script/data_fetch/data-fetch-small.sh
 ```
 
-You can also run this to infer the internal version of the models on some demo images
+Run this to infer the internal version of the models on some demo images
 ```bash
 for base_model in  "unidepth" "pixel_perfect_depth" "depth_anything_small"; do 
   python -m ppd_sharpdepth.infer --checkpoint submodules/SharpDepth/checkpoints/sharpdepth --output_dir /tmp/sharpdepth_out_viz/ --input_dir submodules/SharpDepth/assets/in-the-wild_example --base_model $base_model
 done
+```
+
+Run this to infer the external version of the models on big datasets.
+
+```bash
+source ./script/external_models/run-depth-anything.sh
+source ./script/external_models/run-depth-v2.sh
+source ./script/external_models/run-ppd.sh
+source ./script/external_models/run-sharpdepth.sh
 ```
 
 

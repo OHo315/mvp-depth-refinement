@@ -38,7 +38,7 @@ def download(url):
     assert retval == 0
 
     if args.decompress_dir is not None:
-        cmd = "unzip " + download_file + " -d " + args.decompress_dir
+        cmd = "unzip -q " + download_file + " -d " + args.decompress_dir
         print("")
         print(cmd)
         print("")

@@ -4,6 +4,9 @@ git submodule update --init --recursive
 
 source set-env.sh
 
+echo "" >> ~/.bashrc
+cat set-env.sh >> ~/.bashrc
+
 sudo apt update
 sudo apt install -y imagemagick
 
@@ -47,6 +50,7 @@ pushd submodules/SharpDepth
 python3 -m venv env
 source env/bin/activate
 
+echo "Installing SharpDepth deps"
 pip install -qr docker/requirements.txt
 
 popd
