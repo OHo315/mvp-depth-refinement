@@ -153,7 +153,8 @@ if "__main__" == __name__:
             image_1hwc = transform({'image': (raw_image_1chw/255.).permute(0, 2, 3, 1).squeeze(0).numpy()})['image'][None]
             image_1hwc = torch.from_numpy(image_1hwc).to(device)
 
-            depth_raw_1hw = depth_anything(image_1hwc)
+            disparity_raw_1hw = depth_anything(image_1hwc)
+            depth_raw_1hw = disparity_raw_1hw.max() - disparity_raw_1hw
 
             depth_resized_11hw = F.interpolate(depth_raw_1hw[None], (marigold_preprocessed_image_1chw.shape[-2], marigold_preprocessed_image_1chw.shape[-1]), mode='bilinear', align_corners=False)
 
@@ -165,7 +166,7 @@ if "__main__" == __name__:
             # Output from depth_anything. shape: torch.Size([1, 1, 728, 768]), std: 7.16904878616333, mean: 10.526022911071777, dtype: torch.float32
 
             # print(f"Input to depth_anything. shape: {image_1hwc.shape}, std: {image_1hwc.std()}, mean: {image_1hwc.mean()}, dtype: {image_1hwc.dtype}")
-            # print(f"Resized output from depth_anything. shape: {depth_resized_11hw.shape}, std: {depth_resized_11hw.std()}, mean: {depth_resized_11hw.mean()}, dtype: {depth_resized_11hw.dtype}")
+            # print(f"Resized output from depth_anything. shape: {disparity_raw_1hw.shape}, std: {disparity_raw_1hw.std()}, mean: {disparity_raw_1hw.mean()}, dtype: {disparity_raw_1hw.dtype}")
             # raise NotImplementedError("Depth Anything is not implemented yet")
         
     elif args.base_model == "pixel_perfect_depth":
