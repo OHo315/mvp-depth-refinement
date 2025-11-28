@@ -204,8 +204,7 @@ if "__main__" == __name__:
             rgb = Image.open(os.path.join(input_dir, batch))
             if args.debug: print("filename: ", os.path.join(input_dir, batch))
             out = pipeline(rgb, base_estimator_fn, processing_res=768, denoising_steps=1)
-            depth_colored = out.depth_colored
-            unidepth_colored = out.depth_base_colored
 
-            depth_colored.save(os.path.join(output_dir, batch))
-            unidepth_colored.save(os.path.join(output_dir, batch.split(".")[0] + "_uni.jpg"))
+            out.depth_base_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}.jpg"))
+            out.depth_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}_sharpdepth.png"))
+
