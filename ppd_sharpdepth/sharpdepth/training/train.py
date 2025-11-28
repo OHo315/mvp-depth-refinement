@@ -986,6 +986,10 @@ if "__main__" == __name__:
                             )
                             os.makedirs(saved_dir, exist_ok=True)
 
+                            def unidepth_base_estimator_fn(marigold_preprocessed_image_1chw, _raw_image_1chw):
+                                ret_11hw = unidepth.infer((marigold_preprocessed_image_1chw*255).squeeze().int())['depth']
+                                return ret_11hw
+
                             pipeline = SharpDepthPipeline.from_pretrained(
                                 student_ckpt_dir,
                                 unet=unwrap_model(student_unet),
@@ -1006,13 +1010,13 @@ if "__main__" == __name__:
                                             .astype(np.uint8)
                                         )
                                         out = pipeline(
-                                            rgb, unidepth, processing_res=768, denoising_steps=1
+                                            rgb, unidepth_base_estimator_fn, processing_res=768, denoising_steps=1
                                         )
 
                                         depth_pred = torch.from_numpy(out.depth_np).to(
                                             accelerator.device
                                         )
-                                        depth_uni = torch.from_numpy(out.depth_uni).to(
+                                        depth_base_np = torch.from_numpy(out.depth_base_np).to(
                                             accelerator.device
                                         )
 
@@ -1029,7 +1033,7 @@ if "__main__" == __name__:
                                             depth_pred, gt, valid_mask
                                         )
                                         error_uni = abs_relative_difference_full(
-                                            depth_uni, gt, valid_mask
+                                            depth_base_np, gt, valid_mask
                                         )
 
                                         error_col = colorize(
@@ -1057,7 +1061,7 @@ if "__main__" == __name__:
                                                 f"vis_pred_depth_{loader_idx}_{vis_idx}_{error.mean()}.jpg",
                                             )
                                         )
-                                        out.unidepth_colored.save(
+                                        out.depth_base_colored.save(
                                             os.path.join(
                                                 saved_dir,
                                                 f"vis_unidepth_{loader_idx}_{vis_idx}_{error_uni.mean()}.jpg",

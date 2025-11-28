@@ -47,6 +47,16 @@ source env/bin/activate
 echo "Installing SharpDepth deps"
 pip install -qr docker/requirements.txt
 
+
+if [ ! -d checkpoints ]; then
+  echo "Fetching SharpDepth checkpoints"
+  mkdir checkpoints
+  cd checkpoints
+  hf download andrew-healey/sharpdepth --include "sharpdepth-checkpoints/sharpdepth/**" --local-dir ckpts
+  mv ckpts/sharpdepth-checkpoints/sharpdepth/* sharpdepth/
+  rm -rf ckpts
+fi
+
 popd
 
 pushd submodules/UniDepth

@@ -6,3 +6,5 @@ __pycache__
 /output
 /viz
 /train_output
+/checkpoints
+/wandb
