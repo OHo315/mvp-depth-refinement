@@ -1,3 +1,8 @@
+"""
+NOTE: This file is deprecated. Please use ./metrics.py instead.
+dbe_accuracy is incomplete within this file when initially creating ./metrics.py and has since been left incomplete.
+"""
+
 import cv2 as cv
 
 def abs_rel(predicted, ground):
@@ -84,3 +89,4 @@ def dbe_completeness(predicted, ground):
         return None
     
     return dbe_accuracy(ground, predicted)
+
