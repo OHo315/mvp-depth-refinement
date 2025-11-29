@@ -5,4 +5,4 @@ cd $BASE_DATA_DIR/middlebury_raw
 unzip -q all.zip && rm all.zip
 
 echo "Preprocessing middelbury dataset..."
-python3 script/depth/dataset_preprocess/nyu/nyu_preprocess.py
+python3 script/depth/dataset_preprocess/middlebury/middlebury_preprocess.py
