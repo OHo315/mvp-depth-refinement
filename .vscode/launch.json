@@ -20,7 +20,7 @@
         "--base_ckpt_dir", "jingheya/lotus-depth-g-v1-0",
         "--student_ckpt_dir", "jingheya/lotus-depth-g-v1-0",
         "--add_datetime_prefix",
-        "--report_to", "wandb",
+        // "--report_to", "wandb",
         "--mixed_precision", "bf16",
         "--seed", "42",
         // "--enable_xformers_memory_efficient_attention",
