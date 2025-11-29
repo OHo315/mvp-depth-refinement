@@ -1,9 +1,6 @@
 __pycache__
 *.ipynb
 data
-data2
 output
-Depth-Anything
-pixel-perfect-depth
 env
 
