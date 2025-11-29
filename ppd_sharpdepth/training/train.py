@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
+from diffusers.models.attention_processor import AttnProcessor2_0
 import diffusers
 import matplotlib
 import numpy as np
@@ -35,6 +36,7 @@ from PIL import Image
 from torch.utils.data import ConcatDataset, DataLoader
 from tqdm import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
+from ppd_sharpdepth.base_depth_estimators import get_base_depth_estimator_fn
 from unidepth.models import UniDepthV1
 
 from ppd_sharpdepth.sharpdepth.data.datasets_and_samplers import BaseDepthDataset, DatasetMode, get_dataset
@@ -364,6 +366,7 @@ if "__main__" == __name__:
         ),
     )
     parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA model.")
+    parser.add_argument("--base_model", type=str, default="unidepth", help="Base model to use for depth estimation. Options: unidepth, depth_anything_small, depth_anything_large, pixel_perfect_depth")
 
     args = parser.parse_args()
     output_dir = args.output_dir
@@ -559,7 +562,7 @@ if "__main__" == __name__:
     lotus_unet = UNet2DConditionModel.from_pretrained(
         base_ckpt_dir, subfolder="unet", revision=None
     )
-    unidepth = UniDepthV1.from_pretrained("lpiccinelli/unidepth-v1-vitl14")
+    # unidepth = UniDepthV1.from_pretrained("lpiccinelli/unidepth-v1-vitl14")
 
     vae.requires_grad_(False)
     lotus_unet.requires_grad_(False)
@@ -694,7 +697,9 @@ if "__main__" == __name__:
     lotus_unet.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     student_unet.to(dtype=weight_dtype)
-    unidepth.to(accelerator.device)
+
+    base_depth_estimator_fn = get_base_depth_estimator_fn(args.base_model, accelerator.device, torch.float32)
+
 
     if args.use_ema:
         ema_model = ema_model.to(accelerator.device, dtype=weight_dtype)
@@ -806,11 +811,14 @@ if "__main__" == __name__:
                 intrinsics = batch["intrinsics"].squeeze(0)
 
                 with torch.no_grad():
-                    rgb_unidepth = (rgb.squeeze(0) * 255.0).long()
-                    predictions = unidepth.infer(rgb_unidepth)
 
-                    disp_unidepth = predictions["depth"]
-                    # disp_unidepth = 1/disp_unidepth.clamp(min=1e-6)
+                    # right now we don't add padding / resize down to the max resolution
+                    # weird. this is a train-inference mismatch.
+                    # b/c during inference, we *do*!
+                    # but it's in the original sharpdepth code, so we'll keep it.
+                    # image, _, _ = pipeline.image_processor.preprocess(rgb, 768, "bilinear", accelerator.device)  # [N,3,PPH,PPW]
+
+                    disp_unidepth = base_depth_estimator_fn(rgb, rgb)
 
                 normalize_obj = depth_normalizer(disp_unidepth)
                 norm_disp_unidepth = normalize_obj["norm_depth"].to(dtype=weight_dtype)
@@ -993,10 +1001,6 @@ if "__main__" == __name__:
                             )
                             os.makedirs(saved_dir, exist_ok=True)
 
-                            def unidepth_base_estimator_fn(marigold_preprocessed_image_1chw, _raw_image_1chw):
-                                ret_11hw = unidepth.infer((marigold_preprocessed_image_1chw*255).squeeze().int())['depth']
-                                return ret_11hw
-
                             pipeline = SharpDepthPipeline.from_pretrained(
                                 student_ckpt_dir,
                                 unet=unwrap_model(student_unet),
@@ -1017,7 +1021,7 @@ if "__main__" == __name__:
                                             .astype(np.uint8)
                                         )
                                         out = pipeline(
-                                            rgb, unidepth_base_estimator_fn, processing_res=768, denoising_steps=1
+                                            rgb, base_depth_estimator_fn, processing_res=768, denoising_steps=1
                                         )
 
                                         depth_pred = torch.from_numpy(out.depth_np).to(

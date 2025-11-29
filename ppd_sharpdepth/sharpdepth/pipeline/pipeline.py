@@ -128,7 +128,7 @@ class SharpDepthPipeline(DiffusionPipeline):
     def __call__(
         self,
         input_image: Union[Image.Image, torch.Tensor],
-        base_estimator_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+        base_depth_estimator_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
         intrinsics=None,
         denoising_steps: Optional[int] = None,
         processing_res: Optional[int] = None,
@@ -213,7 +213,7 @@ class SharpDepthPipeline(DiffusionPipeline):
 
         # Normalize rgb values
 
-        depth_base = base_estimator_fn(image, rgb)
+        depth_base = base_depth_estimator_fn(image, rgb)
        
         rgb_norm = image * 2.0 - 1.0  #  [0, 255] -> [-1, 1]
         rgb_norm = rgb_norm.to(self.dtype).to(self.device)

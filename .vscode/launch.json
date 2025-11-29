@@ -9,11 +9,12 @@
       "type": "debugpy",
       "request": "launch",
       "python": "${workspaceFolder}/env/bin/python",
-      "program": "${workspaceFolder}/ppd_sharpdepth/sharpdepth/training/train.py",
+      "program": "${workspaceFolder}/ppd_sharpdepth/training/train.py",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
       "env": {
-        "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}"
+        "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}",
+        "XFORMERS_DISABLED": "1"
       },
       "args": [
         "--depth_weight", "0.4",
@@ -39,7 +40,9 @@
         "--use_ema",
         "--base_data_dir", "${workspaceFolder}/data/",
         "--config", "${workspaceFolder}/config/train_marigold_depth.yaml",
-        "--output_dir", "${workspaceFolder}/train_output/"
+        "--output_dir", "${workspaceFolder}/train_output/",
+        "--base_model", "depth_anything_small",
+        // "--use_sdpa"
       ]
     },
   ]
