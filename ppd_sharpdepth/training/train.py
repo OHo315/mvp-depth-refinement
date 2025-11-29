@@ -818,17 +818,19 @@ if "__main__" == __name__:
                     # but it's in the original sharpdepth code, so we'll keep it.
                     # image, _, _ = pipeline.image_processor.preprocess(rgb, 768, "bilinear", accelerator.device)  # [N,3,PPH,PPW]
 
-                    disp_unidepth = base_depth_estimator_fn(rgb, rgb)
+                    disp_base = base_depth_estimator_fn(rgb, rgb)
 
-                normalize_obj = depth_normalizer(disp_unidepth)
+                normalize_obj = depth_normalizer(disp_base)
                 norm_disp_unidepth = normalize_obj["norm_depth"].to(dtype=weight_dtype)
 
+                # 1. Encode depth (totally lotus-specific)
                 unidepth_latent = encode_depth(vae, norm_disp_unidepth)
 
                 rgb = rgb * 2 - 1
 
                 ## Lotus ##
-                # Encode image
+                # Encode image, text, and timestep
+                # for PPD, we'd have to preprocess timestep and resize the image properly
                 with torch.no_grad():
                     rgb_latent = encode_image(vae, rgb)
                     lotus_timesteps = torch.ones((rgb_latent.shape[0],), device=device) * (
@@ -844,6 +846,7 @@ if "__main__" == __name__:
 
                 # ---------------------------------
                 # extract mask
+                # tbh we'd just wrap this whole thing in an if/else statement
                 with torch.no_grad():
                     lotus_input = torch.cat(
                         [rgb_latent.detach(), torch.randn_like(rgb_latent)], dim=1
@@ -883,6 +886,7 @@ if "__main__" == __name__:
                         lotus_pred, noise, lotus_timesteps
                     )
 
+                    # ah ok, a simple way to mitigate catastrophic forgetting. makes sense, I think.
                     if np.random.rand() < 0.8:
                         noisy_latent = noisy_lotus_latent * latent_mask + unidepth_latent * (
                             1 - latent_mask
