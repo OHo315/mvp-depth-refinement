@@ -52,6 +52,7 @@ class SharpDepthOutput(BaseOutput):
     pred_mask: Union[None, Image.Image]
 
 
+# TODO(andrew): make this support both a Lotus unet and a PPD denoiser
 class SharpDepthPipeline(DiffusionPipeline):
     """
     Pipeline for Marigold Monocular Depth Estimation: https://marigoldcomputervision.github.io.

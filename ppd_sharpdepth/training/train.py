@@ -367,6 +367,7 @@ if "__main__" == __name__:
     )
     parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA model.")
     parser.add_argument("--base_model", type=str, default="unidepth", help="Base model to use for depth estimation. Options: unidepth, depth_anything_small, depth_anything_large, pixel_perfect_depth")
+    parser.add_argument("--diffusion_model", type=str, default="lotus", help="Which model constitutes SharpDepth. Options: lotus, pixel_perfect_depth")
 
     args = parser.parse_args()
     output_dir = args.output_dir
@@ -440,13 +441,13 @@ if "__main__" == __name__:
         if accelerator.is_main_process:
             if args.use_ema:
                 data = {"ema": ema_model.state_dict()}
-                torch.save(data, os.path.join(output_dir, "unet_ema.pt"))
+                torch.save(data, os.path.join(output_dir, "denoiser_ema.pt"))
                 del data
 
             for model in models:
                 sub_dir = (
                     "unet"
-                    if isinstance(model, type(unwrap_model(student_unet)))
+                    if isinstance(model, type(unwrap_model(student_denoiser)))
                     else "text_encoder"
                 )
                 model.save_pretrained(os.path.join(output_dir, sub_dir))
@@ -456,7 +457,7 @@ if "__main__" == __name__:
 
     def load_model_hook(models, input_dir):
         if args.use_ema:
-            data = torch.load(os.path.join(input_dir, "unet_ema.pt"), map_location="cpu")
+            data = torch.load(os.path.join(input_dir, "denoiser_ema.pt"), map_location="cpu")
             ema_model.load_state_dict(data["ema"], strict=False)
             del data
 
@@ -559,25 +560,25 @@ if "__main__" == __name__:
     )
     noise_scheduler = DDPMScheduler.from_pretrained(base_ckpt_dir, subfolder="scheduler")
     vae = AutoencoderKL.from_pretrained(base_ckpt_dir, subfolder="vae", revision=None)
-    lotus_unet = UNet2DConditionModel.from_pretrained(
+    frozen_denoiser = UNet2DConditionModel.from_pretrained(
         base_ckpt_dir, subfolder="unet", revision=None
     )
     # unidepth = UniDepthV1.from_pretrained("lpiccinelli/unidepth-v1-vitl14")
 
     vae.requires_grad_(False)
-    lotus_unet.requires_grad_(False)
+    frozen_denoiser.requires_grad_(False)
     text_encoder.requires_grad_(False)
 
-    student_unet = UNet2DConditionModel.from_pretrained(
+    student_denoiser = UNet2DConditionModel.from_pretrained(
         student_ckpt_dir, subfolder="unet", revision=None
     )
-    student_unet.requires_grad_(True)
+    student_denoiser.requires_grad_(True)
     # ---------------------------------------------------------------------
 
     # -------------------- EMA model --------------------
     if args.use_ema:
         ema_model = EMA(
-            student_unet,
+            student_denoiser,
             beta=0.9999,  # exponential moving average factor
             update_after_step=100,  # only after this number of .update() calls will it start updating
             update_every=10,  # how often to actually update, to save on compute (updates every 10th .update() call)
@@ -595,8 +596,8 @@ if "__main__" == __name__:
                     "xFormers 0.0.16 cannot be used for training in some GPUs. If you observe problems during training, please update xFormers to at least 0.0.17. See https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
                 )
             logger.info("enable xformers memory efficient attention")
-            lotus_unet.enable_xformers_memory_efficient_attention()
-            student_unet.enable_xformers_memory_efficient_attention()
+            frozen_denoiser.enable_xformers_memory_efficient_attention()
+            student_denoiser.enable_xformers_memory_efficient_attention()
         else:
             raise ValueError("xformers is not available. Make sure it is installed correctly")
     # ---------------------------------------------------------------------
@@ -604,7 +605,7 @@ if "__main__" == __name__:
     # -------------------- Gradient checkpointing --------------------
     if args.gradient_checkpointing:
         logger.info("Gradient checkpointing")
-        student_unet.enable_gradient_checkpointing()  # only student unet require grad
+        student_denoiser.enable_gradient_checkpointing()  # only student denoiser require grad
     # ---------------------------------------------------------------------
 
     # -------------------- Sanity check --------------------
@@ -614,13 +615,13 @@ if "__main__" == __name__:
         " doing mixed precision training. copy of the weights should still be float32."
     )
 
-    if unwrap_model(student_unet).dtype != torch.float32:
+    if unwrap_model(student_denoiser).dtype != torch.float32:
         raise ValueError(
-            f"Student unet loaded as datatype {unwrap_model(student_unet).dtype}. {low_precision_error_string}"
+            f"Student denoiser loaded as datatype {unwrap_model(student_denoiser).dtype}. {low_precision_error_string}"
         )
-    if unwrap_model(lotus_unet).dtype != torch.float32:
+    if unwrap_model(frozen_denoiser).dtype != torch.float32:
         raise ValueError(
-            f"Lotus unet loaded as datatype {unwrap_model(lotus_unet).dtype}. {low_precision_error_string}"
+            f"Frozen denoiser loaded as datatype {unwrap_model(frozen_denoiser).dtype}. {low_precision_error_string}"
         )
     # ---------------------------------------------------------------------
 
@@ -647,7 +648,7 @@ if "__main__" == __name__:
     else:
         optimizer_class = torch.optim.AdamW
 
-    params_to_optimize = list(filter(lambda p: p.requires_grad, student_unet.parameters()))
+    params_to_optimize = list(filter(lambda p: p.requires_grad, student_denoiser.parameters()))
 
     optimizer = optimizer_class(
         params_to_optimize,
@@ -677,8 +678,8 @@ if "__main__" == __name__:
     # ---------------------------------------------------------------------
 
     # -------------------- Prepare and move to cuda --------------------
-    student_unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        student_unet, optimizer, train_dataloader, lr_scheduler
+    student_denoiser, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        student_denoiser, optimizer, train_dataloader, lr_scheduler
     )
     # ---------------------------------------------------------------------
 
@@ -691,12 +692,12 @@ if "__main__" == __name__:
     # ---------------------------------------------------------------------
 
     # -------------------- Move freezed model to GPU --------------------
-    # Move vae, unet and text_encoder to device and cast to weight_dtype
+    # Move vae, denoiser, and text_encoder to device and cast to weight_dtype
     # The VAE is in float32 to avoid NaN losses.
     vae.to(accelerator.device, dtype=weight_dtype)
-    lotus_unet.to(accelerator.device, dtype=weight_dtype)
+    frozen_denoiser.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
-    student_unet.to(dtype=weight_dtype)
+    student_denoiser.to(dtype=weight_dtype)
 
     base_depth_estimator_fn = get_base_depth_estimator_fn(args.base_model, accelerator.device, torch.float32)
 
@@ -802,9 +803,9 @@ if "__main__" == __name__:
     # ---------------------------------------------------------------------
 
     for epoch in range(first_epoch, args.num_train_epochs):
-        student_unet.train()
+        student_denoiser.train()
         for step, batch in enumerate(train_dataloader):
-            with accelerator.accumulate(student_unet):
+            with accelerator.accumulate(student_denoiser):
                 rgb = batch["rgb_int"].to(weight_dtype) / 255.0
 
                 ## UniDepth ##
@@ -860,7 +861,7 @@ if "__main__" == __name__:
                             class_labels=batch_task_emb,
                         ).sample
                     else:
-                        lotus_pred = student_unet(
+                        lotus_pred = student_denoiser(
                             lotus_input,
                             lotus_timesteps.to(weight_dtype),
                             batch_empty_text_embed,
@@ -896,7 +897,7 @@ if "__main__" == __name__:
                         student_input = torch.cat([rgb_latent, noise], dim=1)
 
                 # ---------------------------------
-                pred_latent = student_unet(
+                pred_latent = student_denoiser(
                     student_input,
                     lotus_timesteps.to(weight_dtype),
                     encoder_hidden_states=batch_empty_text_embed,
@@ -907,20 +908,20 @@ if "__main__" == __name__:
                 # SDS loss
                 noise = torch.randn_like(pred_latent)
                 noisy_samples = noise_scheduler.add_noise(pred_latent, noise, lotus_timesteps)
-                unet_input = torch.cat([rgb_latent.detach(), noisy_samples], dim=1).to(
+                denoiser_input = torch.cat([rgb_latent.detach(), noisy_samples], dim=1).to(
                     weight_dtype
                 )  # this order is important
 
                 with torch.no_grad():
-                    unet_pred = lotus_unet(
-                        unet_input,
+                    denoiser_pred = frozen_denoiser(
+                        denoiser_input,
                         lotus_timesteps.to(weight_dtype),
                         batch_empty_text_embed,
                         class_labels=batch_task_emb,
                     ).sample
 
                 sigma_t = ((1 - alphas_cumprod[lotus_timesteps]) ** 0.5).view(-1, 1, 1, 1)
-                score_gradient = torch.nan_to_num(sigma_t**2 * (pred_latent - unet_pred))
+                score_gradient = torch.nan_to_num(sigma_t**2 * (pred_latent - denoiser_pred))
                 # ------------------------------------------------------------------
 
                 # ------------------------------------------------------------------
@@ -950,7 +951,7 @@ if "__main__" == __name__:
                     if args.use_ema:
                         ema_model.update()
 
-                    params_to_clip = student_unet.parameters()
+                    params_to_clip = student_denoiser.parameters()
                     accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
 
                 optimizer.step()
@@ -999,7 +1000,7 @@ if "__main__" == __name__:
 
                         if global_step % args.validation_steps == 0 or global_step == 1:
 
-                            student_unet.eval()
+                            student_denoiser.eval()
                             saved_dir = os.path.join(
                                 output_dir, "visualization", f"iter_{global_step}"
                             )
@@ -1007,7 +1008,7 @@ if "__main__" == __name__:
 
                             pipeline = SharpDepthPipeline.from_pretrained(
                                 student_ckpt_dir,
-                                unet=unwrap_model(student_unet),
+                                unet=unwrap_model(student_denoiser),
                                 vae=unwrap_model(vae),
                                 scheduler=noise_scheduler,
                             ).to(accelerator.device, dtype=weight_dtype)
@@ -1097,7 +1098,7 @@ if "__main__" == __name__:
 
                             del pipeline
                             torch.cuda.empty_cache()
-                            student_unet.train()
+                            student_denoiser.train()
 
                 logs = {
                     "loss": loss.detach().item(),
