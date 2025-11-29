@@ -7,9 +7,8 @@ RUN apt-get update && apt install -y openssh-server zip vim  \
 
 RUN mkdir /var/run/sshd
 
-WORKDIR /data/app
-COPY . .
+WORKDIR /workdir
 
 EXPOSE 22
 
-CMD ["./entrypoint.sh"]
+CMD ["git", "clone", "https://github.com/anthonyceponis/mvp-depth-refinement.git"]

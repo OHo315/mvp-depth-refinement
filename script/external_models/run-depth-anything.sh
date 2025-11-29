@@ -36,8 +36,10 @@ for SPLIT in train test; do
         LABELS_DIR="${dir%/}_labels"
         mkdir $LABELS_DIR 
         mv "$dir"depth*  $LABELS_DIR
+        mv "$LABELS_DIR"/filled* $dir
         python3 run.py --encoder vits --img-path "$dir" --outdir "$dir" --pred-only
         mv "$LABELS_DIR"/depth* $dir
+        mv "$LABELS_DIR"/filled* $dir
         rm -rf $LABELS_DIR
     done
 done
@@ -61,3 +63,5 @@ rm -rf $LABELS_DIR
 
 echo "Zipping depth_anything processed middlebury..."
 zip -r "$BASE_DATA_DIR/depth_anything_middlebury.zip" "$BASE_MIDDLEBURY_DATASET_DIR"
+
+popd
