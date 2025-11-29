@@ -27,6 +27,7 @@ def get_base_depth_estimator_fn(base_model: str, device: torch.device, dtype: to
     if base_model == "unidepth":
         unidepth = UniDepthV1.from_pretrained("lpiccinelli/unidepth-v1-vitl14")
         unidepth = unidepth.to(device, dtype=dtype)
+        unidepth.requires_grad_(False)
         def base_depth_estimator_fn(marigold_preprocessed_image_1chw, _raw_image_1chw):
             ret_11hw = unidepth.infer((marigold_preprocessed_image_1chw*255).squeeze().int())['depth']
             return ret_11hw
@@ -45,6 +46,7 @@ def get_base_depth_estimator_fn(base_model: str, device: torch.device, dtype: to
         encoder_kind = "vits" if base_model == "depth_anything_small" else "vitl"
 
         depth_anything = DepthAnything.from_pretrained('LiheYoung/depth_anything_{}14'.format(encoder_kind)).to(device).eval()
+        depth_anything.requires_grad_(False)
 
         transform = Compose([
             Resize(
@@ -89,6 +91,7 @@ def get_base_depth_estimator_fn(base_model: str, device: torch.device, dtype: to
         model = PixelPerfectDepth(semantics_pth=semantics_path, sampling_steps=4)
         model.load_state_dict(torch.load(ckpt_path, map_location='cpu'), strict=False)
         model = model.to(device).eval()
+        model.requires_grad_(False)
 
         def base_depth_estimator_fn(marigold_preprocessed_image_1chw, raw_image_1chw):
             H, W = marigold_preprocessed_image_1chw.squeeze(0).shape[1:3]
