@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
+os.environ["XFORMERS_DISABLED"] = "1"
+
 from diffusers.models.attention_processor import AttnProcessor2_0
 import diffusers
 import matplotlib

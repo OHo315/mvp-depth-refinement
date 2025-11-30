@@ -2,7 +2,6 @@
 
 export WORKSPACE_DIR="$(dirname $0)/.."
 export PYTHONPATH="$WORKSPACE_DIR":$PYTHONPATH
-export XFORMERS_DISABLED=1
 
 accelerate launch ppd_sharpdepth/training/train.py \
     --depth_weight 0.4 \

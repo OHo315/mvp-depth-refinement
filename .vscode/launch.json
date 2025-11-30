@@ -21,7 +21,6 @@
       "cwd": "${workspaceFolder}",
       "env": {
         "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}",
-        "XFORMERS_DISABLED": "1"
       },
       "args": [
         "--depth_weight", "0.4",
