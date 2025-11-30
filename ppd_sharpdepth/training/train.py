@@ -37,7 +37,10 @@ from torch.utils.data import ConcatDataset, DataLoader
 from tqdm import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 from ppd_sharpdepth.base_depth_estimators import get_base_depth_estimator_fn
+from ppd_sharpdepth.ppd.utils.transform import cv2_interpolate, resize_keep_aspect
 from unidepth.models import UniDepthV1
+import random
+from ppd_sharpdepth.sharpdepth_kinds import SharpDepthKind
 
 from ppd_sharpdepth.sharpdepth.data.datasets_and_samplers import BaseDepthDataset, DatasetMode, get_dataset
 from ppd_sharpdepth.sharpdepth.data.datasets_and_samplers.mixed_sampler import MixedBatchSampler
@@ -371,6 +374,9 @@ if "__main__" == __name__:
     parser.add_argument("--denoiser", type=str, default="lotus", help="Which model constitutes SharpDepth. Options: lotus, pixel_perfect_depth")
 
     args = parser.parse_args()
+
+    sharpdepth_kind = SharpDepthKind(args.denoiser)
+
     output_dir = args.output_dir
     base_data_dir = (
         args.base_data_dir if args.base_data_dir is not None else os.environ["BASE_DATA_DIR"]
@@ -562,11 +568,22 @@ if "__main__" == __name__:
     noise_scheduler = DDPMScheduler.from_pretrained(base_ckpt_dir, subfolder="scheduler")
     vae = AutoencoderKL.from_pretrained(base_ckpt_dir, subfolder="vae", revision=None)
 
-    denoiser_subfolder = "unet" if args.denoiser == "lotus" else "ppd"
-    denoiser_cls = UNet2DConditionModel if args.denoiser == "lotus" else PixelPerfectDepth
+    frozen_denoiser_subfolder = {
+        SharpDepthKind.LOTUS: "unet",
+        SharpDepthKind.PIXEL_PERFECT_DEPTH: "ppd"
+    }[sharpdepth_kind]
+
+    denoiser_subfolder = {
+        SharpDepthKind.LOTUS: "unet",
+        SharpDepthKind.PIXEL_PERFECT_DEPTH: "ppd_student"
+    }[sharpdepth_kind]
+    denoiser_cls = {
+        SharpDepthKind.LOTUS: UNet2DConditionModel,
+        SharpDepthKind.PIXEL_PERFECT_DEPTH: PixelPerfectDepth
+    }[sharpdepth_kind]
 
     frozen_denoiser = denoiser_cls.from_pretrained(
-        base_ckpt_dir, subfolder=denoiser_subfolder, revision=None
+        base_ckpt_dir, subfolder=frozen_denoiser_subfolder, revision=None
     )
     # unidepth = UniDepthV1.from_pretrained("lpiccinelli/unidepth-v1-vitl14")
 
@@ -683,8 +700,8 @@ if "__main__" == __name__:
     # ---------------------------------------------------------------------
 
     # -------------------- Prepare and move to cuda --------------------
-    student_denoiser, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        student_denoiser, optimizer, train_dataloader, lr_scheduler
+    student_denoiser, frozen_denoiser, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        student_denoiser, frozen_denoiser, optimizer, train_dataloader, lr_scheduler
     )
     # ---------------------------------------------------------------------
 
@@ -702,7 +719,7 @@ if "__main__" == __name__:
     vae.to(accelerator.device, dtype=weight_dtype)
     frozen_denoiser.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
-    student_denoiser.to(dtype=weight_dtype)
+    student_denoiser.to(accelerator.device, dtype=weight_dtype)
 
     base_depth_estimator_fn = get_base_depth_estimator_fn(args.base_model, accelerator.device, torch.float32)
 
@@ -811,10 +828,48 @@ if "__main__" == __name__:
         student_denoiser.train()
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(student_denoiser):
+                desired_batch_keys = {"rgb_int", "depth_raw_linear", "valid_mask_raw"}
+                assert set(batch.keys()) >= desired_batch_keys, f"Invalid batch keys: {set(batch.keys())}. expected it to contain at least these keys: {desired_batch_keys}"
+                batch = { key: batch[key] for key in desired_batch_keys }
+
+                # resize the image if using ppd!
+
                 rgb = batch["rgb_int"].to(weight_dtype) / 255.0
 
+                if sharpdepth_kind == SharpDepthKind.LOTUS:
+                    # don't resize
+                    pass
+                elif sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
+
+                    rgb_float_hwc = rgb.squeeze(0).permute(1, 2, 0).cpu().float().numpy()
+                    resized_rgb_float_HpWpC = resize_keep_aspect(rgb_float_hwc)
+                    hp, wp, _ = resized_rgb_float_HpWpC.shape
+                    rgb_float_1chw_resized = torch.from_numpy(resized_rgb_float_HpWpC).permute(2, 0, 1).unsqueeze(0).to(device=rgb.device, dtype=rgb.dtype)
+                    rgb_int_1chw_resized = (rgb_float_1chw_resized * 255.0).to(batch["rgb_int"].dtype)
+
+                    depth_raw_linear_11hw = batch["depth_raw_linear"]
+                    depth_raw_linear_hw1 = batch["depth_raw_linear"].squeeze(0,1).unsqueeze(-1).cpu().numpy()
+                    depth_raw_linear_hw1_resized = cv2_interpolate(depth_raw_linear_hw1, (wp, hp))
+                    depth_raw_linear_11hw_resized = torch.from_numpy(depth_raw_linear_hw1_resized).squeeze(-1)[None,None,:,:].to(device=depth_raw_linear_11hw.device, dtype=depth_raw_linear_11hw.dtype)
+
+                    valid_mask_raw_11hw_bool = batch["valid_mask_raw"]
+                    valid_mask_raw_hw1_float = batch["valid_mask_raw"].squeeze(0,1).unsqueeze(-1).cpu().float().numpy()
+                    valid_mask_raw_hw1_float_resized = cv2_interpolate(valid_mask_raw_hw1_float, (wp, hp))
+                    valid_mask_raw_11hw_bool_resized = torch.from_numpy(valid_mask_raw_hw1_float_resized).squeeze(-1)[None,None,:,:].to(device=valid_mask_raw_11hw_bool.device, dtype=valid_mask_raw_11hw_bool.dtype)
+
+                    batch_resized = {
+                        "rgb_int":          rgb_int_1chw_resized,
+                        "depth_raw_linear": depth_raw_linear_11hw_resized,
+                        "valid_mask_raw":   valid_mask_raw_11hw_bool_resized,
+                    }
+
+                    batch = batch_resized
+                    rgb = rgb_float_1chw_resized
+                else:
+                    raise NotImplementedError(f"Image resizing not implemented for denoiser={sharpdepth_kind}")
+                
+
                 ## UniDepth ##
-                intrinsics = batch["intrinsics"].squeeze(0)
 
                 with torch.no_grad():
 
@@ -824,129 +879,203 @@ if "__main__" == __name__:
                     # but it's in the original sharpdepth code, so we'll keep it.
                     # image, _, _ = pipeline.image_processor.preprocess(rgb, 768, "bilinear", accelerator.device)  # [N,3,PPH,PPW]
 
-                    disp_base = base_depth_estimator_fn(rgb, rgb)
+                    disp_base = disp_base_11hw = base_depth_estimator_fn(rgb, rgb)
+                    assert disp_base_11hw.shape[2:] == rgb.shape[2:], f"Base depth map doesn't match its input image resolution! disp_base_11hw.shape[2:] = {disp_base_11hw.shape[2:]}, rgb_float_1chw.shape[2:] = {rgb.shape[2:]}"
 
                 normalize_obj = depth_normalizer(disp_base)
-                norm_disp_unidepth = normalize_obj["norm_depth"].to(dtype=weight_dtype)
+                norm_base_depth = normalize_obj["norm_depth"].to(dtype=weight_dtype)
 
-                # 1. Encode depth (totally lotus-specific)
-                unidepth_latent = encode_depth(vae, norm_disp_unidepth)
+                if sharpdepth_kind == SharpDepthKind.LOTUS:
 
-                rgb = rgb * 2 - 1
+                    # 1. Encode depth (totally lotus-specific)
+                    unidepth_latent = encode_depth(vae, norm_base_depth)
 
-                ## Lotus ##
-                # Encode image, text, and timestep
-                # for PPD, we'd have to preprocess timestep and resize the image properly
-                with torch.no_grad():
-                    rgb_latent = encode_image(vae, rgb)
-                    lotus_timesteps = torch.ones((rgb_latent.shape[0],), device=device) * (
-                        noise_scheduler.config.num_train_timesteps - 1
-                    )
-                    lotus_timesteps = lotus_timesteps.long()
-                    batch_empty_text_embed = empty_text_emb.repeat((rgb_latent.shape[0], 1, 1)).to(
-                        device, dtype=weight_dtype
-                    )
-                    batch_task_emb = task_emb.repeat((rgb_latent.shape[0], 1)).to(
-                        device, dtype=weight_dtype
-                    )
+                    rgb = rgb * 2 - 1
 
-                # ---------------------------------
-                # extract mask
-                # tbh we'd just wrap this whole thing in an if/else statement
-                with torch.no_grad():
-                    lotus_input = torch.cat(
-                        [rgb_latent.detach(), torch.randn_like(rgb_latent)], dim=1
-                    )  # this order is important
-
-                    if args.use_ema:
-                        lotus_pred = ema_model(
-                            lotus_input,
-                            lotus_timesteps.to(weight_dtype),
-                            batch_empty_text_embed,
-                            class_labels=batch_task_emb,
-                        ).sample
-                    else:
-                        lotus_pred = student_denoiser(
-                            lotus_input,
-                            lotus_timesteps.to(weight_dtype),
-                            batch_empty_text_embed,
-                            class_labels=batch_task_emb,
-                        ).sample
-
-                    # ---------------------------------
-                    # decode pred_latent to depth
-                    latent = lotus_pred / vae.config.scaling_factor
-                    z = vae.post_quant_conv(latent.to(weight_dtype))
-                    lotus_depth = vae.decoder(z).mean(dim=1, keepdim=True)
-
-                    # ---------------------------------
-                    # calculate difference
-                    l1_error = torch.abs(lotus_depth - norm_disp_unidepth)
-                    l1_error = l1_error / l1_error.max()
-                    l1_error = l1_error.clip(0, 1)
-
-                    latent_mask = torch.nn.functional.interpolate(l1_error, scale_factor=1 / 8)
-
-                    noise = torch.randn_like(unidepth_latent)
-                    noisy_lotus_latent = noise_scheduler.add_noise(
-                        lotus_pred, noise, lotus_timesteps
-                    )
-
-                    # ah ok, a simple way to mitigate catastrophic forgetting. makes sense, I think.
-                    if np.random.rand() < 0.8:
-                        noisy_latent = noisy_lotus_latent * latent_mask + unidepth_latent * (
-                            1 - latent_mask
+                    ## Lotus ##
+                    # Encode image, text, and timestep
+                    # for PPD, we'd have to preprocess timestep and resize the image properly
+                    with torch.no_grad():
+                        rgb_latent = encode_image(vae, rgb)
+                        lotus_timesteps = torch.ones((rgb_latent.shape[0],), device=device) * (
+                            noise_scheduler.config.num_train_timesteps - 1
                         )
-                        student_input = torch.cat([rgb_latent, noisy_latent], dim=1)
-                    else:
-                        student_input = torch.cat([rgb_latent, noise], dim=1)
+                        lotus_timesteps = lotus_timesteps.long()
+                        batch_empty_text_embed = empty_text_emb.repeat((rgb_latent.shape[0], 1, 1)).to(
+                            device, dtype=weight_dtype
+                        )
+                        batch_task_emb = task_emb.repeat((rgb_latent.shape[0], 1)).to(
+                            device, dtype=weight_dtype
+                        )
 
-                # ---------------------------------
-                pred_latent = student_denoiser(
-                    student_input,
-                    lotus_timesteps.to(weight_dtype),
-                    encoder_hidden_states=batch_empty_text_embed,
-                    class_labels=batch_task_emb,
-                ).sample
+                    # ---------------------------------
+                    # extract mask
+                    # tbh we'd just wrap this whole thing in an if/else statement
+                    with torch.no_grad():
+                        lotus_input = torch.cat(
+                            [rgb_latent.detach(), torch.randn_like(rgb_latent)], dim=1
+                        )  # this order is important
 
-                # ------------------------------------------------------------------
-                # SDS loss
-                noise = torch.randn_like(pred_latent)
-                noisy_samples = noise_scheduler.add_noise(pred_latent, noise, lotus_timesteps)
-                denoiser_input = torch.cat([rgb_latent.detach(), noisy_samples], dim=1).to(
-                    weight_dtype
-                )  # this order is important
+                        if args.use_ema:
+                            lotus_pred = ema_model(
+                                lotus_input,
+                                lotus_timesteps.to(weight_dtype),
+                                batch_empty_text_embed,
+                                class_labels=batch_task_emb,
+                            ).sample
+                        else:
+                            lotus_pred = student_denoiser(
+                                lotus_input,
+                                lotus_timesteps.to(weight_dtype),
+                                batch_empty_text_embed,
+                                class_labels=batch_task_emb,
+                            ).sample
 
-                with torch.no_grad():
-                    denoiser_pred = frozen_denoiser(
-                        denoiser_input,
+                        # ---------------------------------
+                        # decode pred_latent to depth
+                        latent = lotus_pred / vae.config.scaling_factor
+                        z = vae.post_quant_conv(latent.to(weight_dtype))
+                        frozen_pred_depth = vae.decoder(z).mean(dim=1, keepdim=True)
+
+                        # ---------------------------------
+                        # calculate difference
+                        l1_error = torch.abs(frozen_pred_depth - norm_base_depth)
+                        l1_error = l1_error / l1_error.max()
+                        l1_error = l1_error.clip(0, 1)
+
+                        latent_mask = torch.nn.functional.interpolate(l1_error, scale_factor=1 / 8)
+
+                        noise = torch.randn_like(unidepth_latent)
+                        noisy_lotus_latent = noise_scheduler.add_noise(
+                            lotus_pred, noise, lotus_timesteps
+                        )
+
+                        # ah ok, a simple way to mitigate catastrophic forgetting. makes sense, I think.
+                        if np.random.rand() < 0.8:
+                            noisy_latent = noisy_lotus_latent * latent_mask + unidepth_latent * (
+                                1 - latent_mask
+                            )
+                            student_input = torch.cat([rgb_latent, noisy_latent], dim=1)
+                        else:
+                            student_input = torch.cat([rgb_latent, noise], dim=1)
+
+                    # ---------------------------------
+                    pred_latent = student_denoiser(
+                        student_input,
                         lotus_timesteps.to(weight_dtype),
-                        batch_empty_text_embed,
+                        encoder_hidden_states=batch_empty_text_embed,
                         class_labels=batch_task_emb,
                     ).sample
 
-                sigma_t = ((1 - alphas_cumprod[lotus_timesteps]) ** 0.5).view(-1, 1, 1, 1)
-                score_gradient = torch.nan_to_num(sigma_t**2 * (pred_latent - denoiser_pred))
-                # ------------------------------------------------------------------
+                    # ------------------------------------------------------------------
+                    # SDS loss
+                    noise = torch.randn_like(pred_latent)
+                    noisy_samples = noise_scheduler.add_noise(pred_latent, noise, lotus_timesteps)
+                    denoiser_input = torch.cat([rgb_latent.detach(), noisy_samples], dim=1).to(
+                        weight_dtype
+                    )  # this order is important
 
-                # ------------------------------------------------------------------
-                # Compute the SDS loss for the model
-                target = (pred_latent - score_gradient).detach()
-                sds_loss = 0.5 * F.mse_loss(pred_latent.float(), target.float(), reduction="mean")
-                # ------------------------------------------------------------------
+                    with torch.no_grad():
+                        denoiser_pred = frozen_denoiser(
+                            denoiser_input,
+                            lotus_timesteps.to(weight_dtype),
+                            batch_empty_text_embed,
+                            class_labels=batch_task_emb,
+                        ).sample
 
-                # ---------------------------------
-                # decode pred_latent to depth
-                latent = pred_latent / vae.config.scaling_factor
-                z = vae.post_quant_conv(latent.to(weight_dtype))
-                pred_depth = vae.decoder(z).mean(dim=1, keepdim=True)
+                    sigma_t = ((1 - alphas_cumprod[lotus_timesteps]) ** 0.5).view(-1, 1, 1, 1)
+                    score_gradient = torch.nan_to_num(sigma_t**2 * (pred_latent - denoiser_pred))
+                    # ------------------------------------------------------------------
+
+                    # ------------------------------------------------------------------
+                    # Compute the SDS loss for the model
+                    target = (pred_latent - score_gradient).detach()
+                    sds_loss = 0.5 * F.mse_loss(pred_latent.float(), target.float(), reduction="mean")
+                    # ------------------------------------------------------------------
+
+                    # ---------------------------------
+                    # decode pred_latent to depth
+                    latent = pred_latent / vae.config.scaling_factor
+                    z = vae.post_quant_conv(latent.to(weight_dtype))
+                    pred_depth = vae.decoder(z).mean(dim=1, keepdim=True)
+
+                    depth_loss = l1_loss(
+                        pred_depth * 0.5 + 0.5, norm_base_depth * 0.5 + 0.5, l1_error
+                    )
+                
+                elif sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
+
+                    # initial PPD
+                    with torch.no_grad():
+                        cond = rgb - 0.5
+                        noise = torch.randn(size=[cond.shape[0], 1, cond.shape[2], cond.shape[3]]).to(device)
+                        with torch.autocast(device.type,dtype=weight_dtype):
+                            semantics = frozen_denoiser.semantics_prompt(rgb)
+                            latent = noise
+                            for timestep in student_denoiser.sampling_timesteps:
+                                input = torch.cat([latent, cond], dim=1)
+                                pred = frozen_denoiser.dit(x=input, semantics=semantics, timestep=timestep)
+                                latent = student_denoiser.sampler.step(pred=pred, x_t=latent, t=timestep)
+                            frozen_pred_depth = latent + 0.5
+                    
+                        # ---------------------------------
+                        # calculate difference
+                        l1_error = torch.abs(frozen_pred_depth - norm_base_depth)
+                        l1_error = l1_error / l1_error.max()
+                        l1_error = l1_error.clip(0, 1)
+                        l1_mask = l1_error
+                        
+                        timestep = student_denoiser.sampling_timesteps[random.randrange(0, len(student_denoiser.sampling_timesteps) - 1)] - 1
+
+                        should_use_conditioning = np.random.rand() < 0.8
+                        if should_use_conditioning:
+                            x0 = norm_base_depth - 0.5
+                            noisy_depth_cond = norm_base_depth * l1_mask + (torch.randn_like(x0) * (1 - l1_mask))
+                            xT = torch.randn_like(latent)
+
+                            xt = student_denoiser.schedule.forward(x0, xT, timestep)
+
+                            student_input = torch.cat([xt, cond, noisy_depth_cond], dim=1)
+                        else:
+                            x0 = frozen_pred_depth - 0.5
+                            xT = noise
+                            xt = student_denoiser.schedule.forward(x0, xT, timestep)
+                            noisy_depth_cond = torch.randn_like(xt)
+
+                            student_input = torch.cat([xt, cond, noisy_depth_cond], dim=1)
+                    
+                    with torch.autocast(device.type,dtype=weight_dtype):
+                        student_pred_depth_latent_velocity = student_denoiser.dit(x=student_input, semantics=semantics, timestep=timestep)
+                        student_pred_depth_latent, _ = student_denoiser.schedule.convert_from_pred(student_pred_depth_latent_velocity, 'velocity', xt, timestep)
+                        pred_depth = student_pred_depth = student_pred_depth_latent + 0.5
+                    
+
+                        # SDS loss
+                        noise = torch.randn_like(student_pred_depth_latent)
+                        noised_student_pred_depth_latent = noise_scheduler.add_noise(student_pred_depth_latent, noise, timestep)
+                        with torch.no_grad():
+                            frozen_denoiser_input = torch.cat([noised_student_pred_depth_latent, cond], dim=1)
+                            frozen_denoiser_pred_depth_latent_velocity = frozen_denoiser.dit(frozen_denoiser_input, semantics=semantics, timestep=timestep)
+                            frozen_denoiser_pred_depth_latent = frozen_denoiser.schedule.convert_from_pred(frozen_denoiser_pred_depth_latent_velocity, 'velocity', noised_student_pred_depth_latent, timestep)
+
+                            pred_noise, _ = frozen_denoiser.schedule.convert_from_pred(frozen_denoiser_pred_depth_latent_velocity, 'velocity', noised_student_pred_depth_latent, timestep)
+
+                            # we don't need to multiply by a constant (e.g. sigma squared) b/c PPD uses a linear diffusion schedule. so velocity = epsilon / 1000
+                            # TODO check if the linear diffusion schedule actually makes this ^^ true
+                            # TODO figure out if the sign should be reversed here
+                            score_vector = (pred_noise - noise)
+                        
+                    sds_loss = (student_pred_depth_latent * score_vector).mean()
+
+                    depth_loss = l1_loss(
+                        student_pred_depth_latent, x0, l1_error
+                    )
+
+                else:
+                    raise NotImplementedError(f"Image resizing not implemented for denoiser={sharpdepth_kind}")
 
                 # ------------------------------------------------------------------
                 # Depth loss
-
-                depth_loss = l1_loss(
-                    pred_depth * 0.5 + 0.5, norm_disp_unidepth * 0.5 + 0.5, l1_error
-                )
 
                 # ------------------------------------------------------------------
                 # Optimization
@@ -1011,11 +1140,25 @@ if "__main__" == __name__:
                             )
                             os.makedirs(saved_dir, exist_ok=True)
 
+                            default_denoising_steps = {
+                                SharpDepthKind.LOTUS: 1,
+                                SharpDepthKind.PIXEL_PERFECT_DEPTH: 4,
+                            }[sharpdepth_kind]
+
+                            default_processing_resolution = {
+                                SharpDepthKind.LOTUS: 768,
+                                SharpDepthKind.PIXEL_PERFECT_DEPTH: 1024, # TODO sanity check this?
+                            }[sharpdepth_kind]
+
                             pipeline = SharpDepthPipeline.from_pretrained(
                                 student_ckpt_dir,
                                 unet=unwrap_model(student_denoiser),
+                                frozen_unet=unwrap_model(frozen_denoiser),
                                 vae=unwrap_model(vae),
                                 scheduler=noise_scheduler,
+                                default_processing_resolution=default_processing_resolution,
+                                default_denoising_steps=default_denoising_steps,
+                                sharpdepth_kind=sharpdepth_kind,
                             ).to(accelerator.device, dtype=weight_dtype)
                             with torch.no_grad():
                                 for loader_idx, loader in enumerate(val_loaders):

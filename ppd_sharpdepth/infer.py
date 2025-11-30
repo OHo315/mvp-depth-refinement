@@ -5,6 +5,8 @@ import argparse
 import logging
 import os
 
+os.environ["XFORMERS_DISABLED"] = "1"
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -17,6 +19,7 @@ from .sharpdepth.pipeline.pipeline import SharpDepthPipeline
 import debugpy
 
 from .base_depth_estimators import get_base_depth_estimator_fn
+from .sharpdepth_kinds import SharpDepthKind
 
 if "__main__" == __name__:
     logging.basicConfig(level=logging.INFO)
@@ -89,7 +92,9 @@ if "__main__" == __name__:
         dtype = torch.float32
         variant = None
 
-    pipeline = SharpDepthPipeline.from_pretrained(checkpoint_path)
+    pipeline = SharpDepthPipeline.from_pretrained(checkpoint_path, sharpdepth_kind=SharpDepthKind.LOTUS, default_processing_resolution=768, default_denoising_steps=1)
+    assert pipeline.default_processing_resolution == 768, f"default_processing_resolution = {pipeline.default_processing_resolution}, expected 768"
+    assert pipeline.default_denoising_steps == 1, f"default_denoising_steps = {pipeline.default_denoising_steps}, expected 1"
 
     pipeline = pipeline.to(device, dtype=dtype)
 
@@ -102,7 +107,7 @@ if "__main__" == __name__:
             # Read input image
             rgb = Image.open(os.path.join(input_dir, batch))
             if args.debug: print("filename: ", os.path.join(input_dir, batch))
-            out = pipeline(rgb, base_depth_estimator_fn, processing_res=768, denoising_steps=1)
+            out = pipeline(rgb, base_depth_estimator_fn)
 
             out.depth_base_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}.jpg"))
             out.depth_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}_sharpdepth.png"))

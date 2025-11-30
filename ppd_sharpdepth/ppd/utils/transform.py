@@ -53,17 +53,15 @@ def resize_keep_aspect(image):
     resize_h = max(16, int(round(resize_h / 16)) * 16)
     resize_w = max(16, int(round(resize_w / 16)) * 16)
 
-    if scale < 1:
-        image = cv2.resize(image, (resize_w, resize_h), interpolation=cv2.INTER_AREA)
+    return cv2_interpolate(image, (resize_w, resize_h))
+
+
+
+def cv2_interpolate(image, size):
+    h, w, _ = image.shape
+    resize_w, resize_h = size
+    is_downscale = w >= resize_w and h >= resize_h
+    if is_downscale:
+        return cv2.resize(image, (resize_w, resize_h), interpolation=cv2.INTER_AREA)
     else:
-        image = cv2.resize(image, (resize_w, resize_h), interpolation=cv2.INTER_CUBIC)
-    return image
-
-
-
-
-
-        
-
-
-
+        return cv2.resize(image, (resize_w, resize_h), interpolation=cv2.INTER_CUBIC)

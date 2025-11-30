@@ -28,7 +28,8 @@ class PixelPerfectDepth(ModelMixin, ConfigMixin):
         sampling_steps:int=4,
         depth_anything_v2_encoder:str='vitl',
         depth_anything_v2_features:int=256,
-        depth_anything_v2_out_channels:List[int]=[256, 512, 1024, 1024]
+        depth_anything_v2_out_channels:List[int]=[256, 512, 1024, 1024],
+        dit_in_channels:int=4,
     ):
         super(PixelPerfectDepth, self).__init__()
 
@@ -41,7 +42,7 @@ class PixelPerfectDepth(ModelMixin, ConfigMixin):
         if semantics_pth is not None:
             self.semantics_encoder.load_state_dict(torch.load(semantics_pth, map_location='cpu'), strict=False)
         self.semantics_encoder = self.semantics_encoder.eval()
-        self.dit = DiT()
+        self.dit = DiT(in_channels=dit_in_channels)
 
         self.sampling_steps = sampling_steps
 
@@ -61,24 +62,25 @@ class PixelPerfectDepth(ModelMixin, ConfigMixin):
             sampling_steps=sampling_steps,
             depth_anything_v2_encoder=depth_anything_v2_encoder,
             depth_anything_v2_features=depth_anything_v2_features,
-            depth_anything_v2_out_channels=depth_anything_v2_out_channels
+            depth_anything_v2_out_channels=depth_anything_v2_out_channels,
+            dit_in_channels=dit_in_channels
         )
     
     @torch.no_grad()
-    def infer_image(self, image, use_fp16: bool = True):
+    def infer_image(self, image_bgr_hwc, use_fp16: bool = True):
         # Resize the image to match the training resolution area while keeping the original aspect ratio.
-        resize_image = resize_keep_aspect(image)
-        image = image2tensor(resize_image)
-        image = image.to(self.device)
+        resize_image_bgr_hwc = resize_keep_aspect(image_bgr_hwc)
+        image_rgb_1chw = image2tensor(resize_image_bgr_hwc)
+        image_rgb_1chw = image_rgb_1chw.to(self.device)
         with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=True):
-            depth = self.forward_test(image)
-        return depth, resize_image
+            depth = self.forward_test(image_rgb_1chw)
+        return depth, resize_image_bgr_hwc
     
     @torch.no_grad()
-    def forward_test(self, image):
+    def forward_test(self, image_rgb_1chw):
 
-        semantics = self.semantics_prompt(image)
-        cond = image - 0.5
+        semantics = self.semantics_prompt(image_rgb_1chw)
+        cond = image_rgb_1chw - 0.5
         latent = torch.randn(size=[cond.shape[0], 1, cond.shape[2], cond.shape[3]]).to(self.device)
         
         for timestep in self.sampling_timesteps:
@@ -90,7 +92,7 @@ class PixelPerfectDepth(ModelMixin, ConfigMixin):
 
 
     @torch.no_grad()
-    def semantics_prompt(self, image):
+    def semantics_prompt(self, image_rgb_hwc):
         with torch.no_grad():
-            semantics = self.semantics_encoder(image)
+            semantics = self.semantics_encoder(image_rgb_hwc)
         return semantics

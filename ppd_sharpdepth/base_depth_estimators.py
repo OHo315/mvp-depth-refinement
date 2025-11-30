@@ -92,7 +92,8 @@ def get_base_depth_estimator_fn(base_model: str, device: torch.device, dtype: to
         def base_depth_estimator_fn(marigold_preprocessed_image_1chw, raw_image_1chw):
             H, W = marigold_preprocessed_image_1chw.squeeze(0).shape[1:3]
             raw_image_hwc = raw_image_1chw.squeeze(0).permute(1, 2, 0).float().cpu().numpy()
-            depth_raw_11hw, _ = model.infer_image(raw_image_hwc)
+            raw_image_hwc_bgr = cv2.cvtColor(raw_image_hwc, cv2.COLOR_RGB2BGR) # infer_image() applies a BGR->RGB conversion, so we must first convert from RGB->BGR here
+            depth_raw_11hw, _ = model.infer_image(raw_image_hwc_bgr)
             depth_11hw = F.interpolate(depth_raw_11hw, size=(H, W), mode='bilinear', align_corners=False)
             return depth_11hw
 
