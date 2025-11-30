@@ -85,11 +85,7 @@ def get_base_depth_estimator_fn(base_model: str, device: torch.device, dtype: to
         
     elif base_model == "pixel_perfect_depth":
 
-        ckpt_path = hf_hub_download(repo_id="gangweix/pixel-perfect-depth", filename="ppd.pth")
-        semantics_path = hf_hub_download(repo_id="depth-anything/Depth-Anything-V2-Large", filename="depth_anything_v2_vitl.pth")
-
-        model = PixelPerfectDepth(semantics_pth=semantics_path, sampling_steps=4)
-        model.load_state_dict(torch.load(ckpt_path, map_location='cpu'), strict=False)
+        model = PixelPerfectDepth.from_pretrained("andrew-healey/sharpdepth", subfolder="ppd")
         model = model.to(device).eval()
         model.requires_grad_(False)
 

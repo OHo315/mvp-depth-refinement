@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 from enum import Enum
 from ppd_sharpdepth.ppd.utils.timesteps import Timesteps
 from ppd_sharpdepth.ppd.utils.schedule import LinearSchedule

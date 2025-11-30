@@ -5,6 +5,13 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Python Debugger: Remote Attach",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": { "host": "localhost", "port": 5678 },
+      "pathMappings": [{ "localRoot": "${workspaceFolder}", "remoteRoot": "." }]
+    },
+    {
       "name": "Train SharpDepth",
       "type": "debugpy",
       "request": "launch",
@@ -18,8 +25,8 @@
       },
       "args": [
         "--depth_weight", "0.4",
-        "--base_ckpt_dir", "jingheya/lotus-depth-g-v1-0",
-        "--student_ckpt_dir", "jingheya/lotus-depth-g-v1-0",
+        "--base_ckpt_dir", "andrew-healey/sharpdepth",
+        "--student_ckpt_dir", "andrew-healey/sharpdepth",
         "--add_datetime_prefix",
         // "--report_to", "wandb",
         "--mixed_precision", "bf16",

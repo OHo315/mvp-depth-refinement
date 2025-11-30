@@ -1,8 +1,8 @@
 from typing import Union
 import torch
+import torch.nn as nn
 
-
-class Timesteps:
+class Timesteps(nn.Module):
     """
     Sampling timesteps.
     It defines the discretization of sampling steps.
@@ -12,11 +12,10 @@ class Timesteps:
         self,
         T: int,
         steps: int,
-        device: torch.device = "cpu",
     ):
+        super(Timesteps, self).__init__()
         self.T = T
-        timesteps = torch.arange(T, -1, -(T + 1) / steps, device=device).round().int()
-        self.timesteps = timesteps
+        self.register_buffer("timesteps", torch.arange(T, -1, -(T + 1) / steps).round().int())
 
     def __len__(self) -> int:
         """

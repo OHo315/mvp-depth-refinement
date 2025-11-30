@@ -14,25 +14,33 @@ from ppd_sharpdepth.ppd.utils.transform import image2tensor, resize_1024, resize
 from ppd_sharpdepth.ppd.models.depth_anything_v2.dpt import DepthAnythingV2
 from ppd_sharpdepth.ppd.models.dit import DiT
 
-class PixelPerfectDepth(nn.Module):
+from huggingface_hub import PyTorchModelHubMixin
+from diffusers import ConfigMixin, ModelMixin
+
+from typing import List, Any, Dict, Union, Optional
+
+class PixelPerfectDepth(ModelMixin, ConfigMixin):
+    config_name = "config.json"
+
     def __init__(
         self,
-        semantics_pth='checkpoints/depth_anything_v2_vitl.pth',
-        sampling_steps=10,
-
+        semantics_pth:Optional[str]=None,
+        sampling_steps:int=4,
+        depth_anything_v2_encoder:str='vitl',
+        depth_anything_v2_features:int=256,
+        depth_anything_v2_out_channels:List[int]=[256, 512, 1024, 1024]
     ):
         super(PixelPerfectDepth, self).__init__()
 
-        DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
-        self.device = DEVICE
-
         self.semantics_encoder = DepthAnythingV2(
-            encoder='vitl',
-            features=256,
-            out_channels=[256, 512, 1024, 1024]
+            encoder=depth_anything_v2_encoder,
+            features=depth_anything_v2_features,
+            out_channels=depth_anything_v2_out_channels
         )
-        self.semantics_encoder.load_state_dict(torch.load(semantics_pth, map_location='cpu'), strict=False)
-        self.semantics_encoder = self.semantics_encoder.to(self.device).eval()
+
+        if semantics_pth is not None:
+            self.semantics_encoder.load_state_dict(torch.load(semantics_pth, map_location='cpu'), strict=False)
+        self.semantics_encoder = self.semantics_encoder.eval()
         self.dit = DiT()
 
         self.sampling_steps = sampling_steps
@@ -41,12 +49,19 @@ class PixelPerfectDepth(nn.Module):
         self.sampling_timesteps = Timesteps(
             T=self.schedule.T,
             steps=self.sampling_steps,
-            device=self.device,
         )
         self.sampler = EulerSampler(
             schedule=self.schedule,
             timesteps=self.sampling_timesteps,
             prediction_type='velocity'
+        )
+
+        # required for ConfigMixin
+        self.register_to_config(
+            sampling_steps=sampling_steps,
+            depth_anything_v2_encoder=depth_anything_v2_encoder,
+            depth_anything_v2_features=depth_anything_v2_features,
+            depth_anything_v2_out_channels=depth_anything_v2_out_channels
         )
     
     @torch.no_grad()

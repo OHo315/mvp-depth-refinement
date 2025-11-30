@@ -45,6 +45,7 @@ from ppd_sharpdepth.sharpdepth.pipeline.pipeline import SharpDepthPipeline
 from ppd_sharpdepth.sharpdepth.util.config_util import find_value_in_omegaconf, recursive_load_config
 from ppd_sharpdepth.sharpdepth.util.logging_util import config_logging
 from ppd_sharpdepth.sharpdepth.util.normalizer import ScaleShiftNormalizer
+from ppd_sharpdepth.ppd.models.ppd import PixelPerfectDepth
 
 logger = get_logger(__name__)
 
@@ -367,7 +368,7 @@ if "__main__" == __name__:
     )
     parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA model.")
     parser.add_argument("--base_model", type=str, default="unidepth", help="Base model to use for depth estimation. Options: unidepth, depth_anything_small, depth_anything_large, pixel_perfect_depth")
-    parser.add_argument("--diffusion_model", type=str, default="lotus", help="Which model constitutes SharpDepth. Options: lotus, pixel_perfect_depth")
+    parser.add_argument("--denoiser", type=str, default="lotus", help="Which model constitutes SharpDepth. Options: lotus, pixel_perfect_depth")
 
     args = parser.parse_args()
     output_dir = args.output_dir
@@ -466,7 +467,7 @@ if "__main__" == __name__:
             model = models.pop()
 
             # load diffusers style into model
-            load_model = UNet2DConditionModel.from_pretrained(input_dir, subfolder="unet")
+            load_model = denoiser_cls.from_pretrained(input_dir, subfolder=denoiser_subfolder)
             model.register_to_config(**load_model.config)
 
             model.load_state_dict(load_model.state_dict())
@@ -560,8 +561,12 @@ if "__main__" == __name__:
     )
     noise_scheduler = DDPMScheduler.from_pretrained(base_ckpt_dir, subfolder="scheduler")
     vae = AutoencoderKL.from_pretrained(base_ckpt_dir, subfolder="vae", revision=None)
-    frozen_denoiser = UNet2DConditionModel.from_pretrained(
-        base_ckpt_dir, subfolder="unet", revision=None
+
+    denoiser_subfolder = "unet" if args.denoiser == "lotus" else "ppd"
+    denoiser_cls = UNet2DConditionModel if args.denoiser == "lotus" else PixelPerfectDepth
+
+    frozen_denoiser = denoiser_cls.from_pretrained(
+        base_ckpt_dir, subfolder=denoiser_subfolder, revision=None
     )
     # unidepth = UniDepthV1.from_pretrained("lpiccinelli/unidepth-v1-vitl14")
 
@@ -569,8 +574,8 @@ if "__main__" == __name__:
     frozen_denoiser.requires_grad_(False)
     text_encoder.requires_grad_(False)
 
-    student_denoiser = UNet2DConditionModel.from_pretrained(
-        student_ckpt_dir, subfolder="unet", revision=None
+    student_denoiser = denoiser_cls.from_pretrained(
+        student_ckpt_dir, subfolder=denoiser_subfolder, revision=None
     )
     student_denoiser.requires_grad_(True)
     # ---------------------------------------------------------------------
