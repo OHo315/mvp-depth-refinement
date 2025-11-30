@@ -37,13 +37,13 @@ source env/bin/activate
 echo "Installing pixel perfect deps"
 pip install -qr requirements.txt
 
-echo "Downloading pixel perfect checkpoint"
-PPD_CHECKPOINT_DIR=submodules/pixel-perfect-depth/checkpoints
-mkdir -p PPD_CHECKPOINT_DIR
-wget -P PPD_CHECKPOINT_DIR "https://huggingface.co/gangweix/Pixel-Perfect-Depth/resolve/main/ppd.pth"
+# echo "Downloading pixel perfect checkpoint"
+# PPD_CHECKPOINT_DIR=checkpoints
+# mkdir -p $PPD_CHECKPOINT_DIR
+# wget -P $PPD_CHECKPOINT_DIR "https://huggingface.co/gangweix/Pixel-Perfect-Depth/resolve/main/ppd.pth"
 
-echo "Downloading pixel perfect depth anything v2 dependency checkpoint"
-wget -P PPD_CHECKPOINT_DIR "https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth"
+# echo "Downloading pixel perfect depth anything v2 dependency checkpoint"
+# wget -P $PPD_CHECKPOINT_DIR "https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth"
 
 popd
 
@@ -61,8 +61,8 @@ if [ ! -d checkpoints ]; then
   mkdir checkpoints
   cd checkpoints
   hf download andrew-healey/sharpdepth --include "sharpdepth-checkpoints/sharpdepth/**" --local-dir ckpts
-  mv ckpts/sharpdepth-checkpoints/sharpdepth/* sharpdepth/
-  rm -rf ckpts
+  mkdir -p sharpdepth
+  mv ckpts/sharpdepth-checkpoints/sharpdepth/* sharpdepth/ && rm -rf ckpts
 fi
 
 popd
