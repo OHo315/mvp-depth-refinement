@@ -63,7 +63,7 @@ class MixedBatchSampler(BatchSampler):
         self.n_total_batch = sum(self.n_batches)
 
         # sampling probability
-        if prob is None:
+        if prob is None or len(prob) == 0:
             # if not given, decide by dataset length
             self.prob = torch.tensor(self.n_batches) / self.n_total_batch
         else:

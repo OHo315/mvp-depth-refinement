@@ -10,7 +10,7 @@ import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
-
+import debugpy
 from ppd_sharpdepth.sharpdepth.util.alignment import align_depth_least_square
 
 os.environ["XFORMERS_DISABLED"] = "1"
@@ -379,6 +379,9 @@ if "__main__" == __name__:
     parser.add_argument("--base_model", type=str, default="unidepth", help="Base model to use for depth estimation. Options: unidepth, depth_anything_small, depth_anything_large, pixel_perfect_depth")
     parser.add_argument("--denoiser", type=str, default="lotus", help="Which model constitutes SharpDepth. Options: lotus, pixel_perfect_depth")
     parser.add_argument("--use_conditioning_probability", type=float, default=0.8, help="Probability of using conditioning in the student denoiser")
+    parser.add_argument("--wandb_name", type=str, default="", help="Name of the wandb run")
+    parser.add_argument("--debug", action="store_true", help="Debug mode")
+    parser.add_argument("--compute_initial_depth_loss_probability", type=float, default=0.1, help="Probability of computing the initial depth loss")
 
     args = parser.parse_args()
 
@@ -432,9 +435,18 @@ if "__main__" == __name__:
         diffusers.utils.logging.set_verbosity_error()
     # ---------------------------------------------------------------------
 
+    if args.debug and accelerator.is_local_main_process:
+        debugpy.listen(5678)
+        print("Waiting for debugger to attach...")
+        debugpy.wait_for_client()
+        print("Debugger attached")
+
+
     # -------------------- set seed --------------------
     if args.seed is not None:
         set_seed(args.seed)
+    
+    conditioning_rng = np.random.default_rng(args.seed + 47 * accelerator.process_index)
     # ---------------------------------------------------------------------
 
     # -------------------- create logging folder --------------------
@@ -531,9 +543,10 @@ if "__main__" == __name__:
             if len(data) == 0:
                 breakpoint()
         dataset_ls = train_dataset
-        assert len(cfg_data.train.prob_ls) == len(
-            dataset_ls
-        ), "Lengths don't match: `prob_ls` and `dataset_list`"
+        if len(cfg_data.train.prob_ls) > 0:
+            assert len(cfg_data.train.prob_ls) == len(
+                dataset_ls
+            ), "Lengths don't match: `prob_ls` and `dataset_list`"
         concat_dataset = ConcatDataset(dataset_ls)
         mixed_sampler = MixedBatchSampler(
             src_dataset_ls=dataset_ls,
@@ -665,6 +678,8 @@ if "__main__" == __name__:
             * args.train_batch_size
             * accelerator.num_processes
         )
+
+    print(f"[process {accelerator.process_index}] real learning rate: {args.learning_rate}")
     # ---------------------------------------------------------------------
 
     # -------------------- Set up optimizer --------------------
@@ -767,6 +782,7 @@ if "__main__" == __name__:
         init_kwargs = {
             "wandb": {
                 "entity": cfg.wandb.entity,
+                "name": args.wandb_name
             }
         } if args.report_to == "wandb" else {}
 
@@ -994,7 +1010,7 @@ if "__main__" == __name__:
                         )
 
                         # ah ok, a simple way to mitigate catastrophic forgetting. makes sense, I think.
-                        if np.random.rand() < args.use_conditioning_probability:
+                        if conditioning_rng.random() < args.use_conditioning_probability:
                             conditioning_kind = "cond"
                             noisy_latent = noisy_lotus_latent * latent_mask + unidepth_latent * (
                                 1 - latent_mask
@@ -1050,20 +1066,22 @@ if "__main__" == __name__:
 
                     # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
 
-                    with torch.no_grad():
+                    initial_depth_loss = None
+                    if conditioning_rng.random() < args.compute_initial_depth_loss_probability:
+                        with torch.no_grad():
 
-                        frozen_pred_depth_aligned, _, _ = align_depth_least_square(
-                            gt_arr=(norm_base_depth * 0.5 + 0.5).detach().float().cpu().numpy(),
-                            pred_arr=frozen_pred_depth.detach().float().cpu().numpy(),
-                            valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
-                            return_scale_shift=True,
-                            max_resolution=None,
-                        )
-                        frozen_pred_depth_aligned = torch.from_numpy(frozen_pred_depth_aligned).to(device)
+                            frozen_pred_depth_aligned, _, _ = align_depth_least_square(
+                                gt_arr=(norm_base_depth * 0.5 + 0.5).detach().float().cpu().numpy(),
+                                pred_arr=frozen_pred_depth.detach().float().cpu().numpy(),
+                                valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
+                                return_scale_shift=True,
+                                max_resolution=None,
+                            )
+                            frozen_pred_depth_aligned = torch.from_numpy(frozen_pred_depth_aligned).to(device)
 
-                        initial_depth_loss = l1_loss(
-                            frozen_pred_depth_aligned, norm_base_depth * 0.5 + 0.5, l1_error
-                        )
+                            initial_depth_loss = l1_loss(
+                                frozen_pred_depth_aligned, norm_base_depth * 0.5 + 0.5, l1_error
+                            )
 
 
                 
@@ -1093,7 +1111,7 @@ if "__main__" == __name__:
                         
                         timestep = unwrapped_student_denoiser.sampling_timesteps[random.randrange(0, len(unwrapped_student_denoiser.sampling_timesteps) - 1)]
 
-                        should_use_conditioning = np.random.rand() < args.use_conditioning_probability
+                        should_use_conditioning = conditioning_rng.random() < args.use_conditioning_probability
                         if should_use_conditioning:
                             conditioning_kind = "cond"
                             x0 = norm_base_depth - 0.5
@@ -1136,20 +1154,22 @@ if "__main__" == __name__:
 
                     # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
 
-                    with torch.no_grad():
+                    initial_depth_loss = None
+                    if conditioning_rng.random() < args.compute_initial_depth_loss_probability:
+                        with torch.no_grad():
 
-                        frozen_pred_depth_aligned, _, _ = align_depth_least_square(
-                            gt_arr=(x0 + 0.5).detach().float().cpu().numpy(),
-                            pred_arr=frozen_pred_depth.detach().float().cpu().numpy(),
-                            valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
-                            return_scale_shift=True,
-                            max_resolution=None,
-                        )
-                        frozen_pred_depth_aligned = torch.from_numpy(frozen_pred_depth_aligned).to(device)
+                            frozen_pred_depth_aligned, _, _ = align_depth_least_square(
+                                gt_arr=(x0 + 0.5).detach().float().cpu().numpy(),
+                                pred_arr=frozen_pred_depth.detach().float().cpu().numpy(),
+                                valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
+                                return_scale_shift=True,
+                                max_resolution=None,
+                            )
+                            frozen_pred_depth_aligned = torch.from_numpy(frozen_pred_depth_aligned).to(device)
 
-                        initial_depth_loss = l1_loss(
-                            frozen_pred_depth_aligned, x0 + 0.5, l1_error
-                        )
+                            initial_depth_loss = l1_loss(
+                                frozen_pred_depth_aligned, x0 + 0.5, l1_error
+                            )
 
                 else:
                     raise NotImplementedError(f"Image resizing not implemented for denoiser={sharpdepth_kind}")
@@ -1390,13 +1410,13 @@ if "__main__" == __name__:
                         "total": (loss.detach(), torch.tensor(1,device=loss.device)),
                         "sds": (sds_loss.detach(), torch.tensor(1,device=sds_loss.device)),
                         "depth": (depth_loss.detach(), torch.tensor(1,device=depth_loss.device)),
-                        "initial_depth": (initial_depth_loss.detach(), torch.tensor(1,device=initial_depth_loss.device)),
+                        "initial_depth": (initial_depth_loss.detach() if initial_depth_loss is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_loss.device) if initial_depth_loss is not None else torch.tensor(0,device=device)),
                     },
                     "all": {
                         "total": (loss.detach(), torch.tensor(1,device=loss.device)),
                         "sds": (sds_loss.detach(), torch.tensor(1,device=sds_loss.device)),
                         "depth": (depth_loss.detach(), torch.tensor(1,device=depth_loss.device)),
-                        "initial_depth": (initial_depth_loss.detach(), torch.tensor(1,device=initial_depth_loss.device)),
+                        "initial_depth": (initial_depth_loss.detach() if initial_depth_loss is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_loss.device) if initial_depth_loss is not None else torch.tensor(0,device=device)),
                     },
                     **{empty_conditioning_kind:{loss_key:(torch.tensor(0,device=device),torch.tensor(0,device=device)) for loss_key in loss_keys} for empty_conditioning_kind in conditioning_kinds if empty_conditioning_kind not in [conditioning_kind, "all"]}
                 }

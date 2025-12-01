@@ -5,7 +5,7 @@ export PYTHONPATH="$WORKSPACE_DIR":$PYTHONPATH
 echo $WORKSPACE_DIR
 echo $PYTHONPATH
 
-accelerate launch ppd_sharpdepth/training/train.py \
+accelerate launch --num_processes 4 --gpu-ids 0,1,2,3 ppd_sharpdepth/training/train.py \
     --depth_weight 0.4 \
     --base_ckpt_dir andrew-healey/sharpdepth \
     --student_ckpt_dir andrew-healey/sharpdepth \
@@ -14,21 +14,22 @@ accelerate launch ppd_sharpdepth/training/train.py \
     --mixed_precision bf16 \
     --seed 42 \
     --allow_tf32 \
-    --learning_rate 1e-5 \
-    --scale_lr \
+    --learning_rate 0e-5 \
+    --wandb_name "big_ds_warmup_150" \
     --lr_scheduler cosine \
-    --lr_warmup_steps 50 \
+    --lr_warmup_steps 150 \
     --tracker_project_name ppd_sharpdepth_train \
     --set_grads_to_none \
     --checkpointing_steps 5000 \
     --validation_steps 100 \
     --train_batch_size 1 \
     --gradient_accumulation_steps 8 \
-    --num_train_epochs 6 \
+    --num_train_epochs 1 \
     --use_ema \
     --base_data_dir "$WORKSPACE_DIR/data/" \
     --config "$WORKSPACE_DIR/config/train_marigold_depth.yaml" \
     --output_dir "$WORKSPACE_DIR/train_output/" \
     --base_model unidepth \
     --denoiser pixel_perfect_depth \
-    --use_conditioning_probability 0.8
+    --use_conditioning_probability 0.8 \
+    "$@"
