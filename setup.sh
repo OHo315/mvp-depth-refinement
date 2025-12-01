@@ -1,5 +1,9 @@
 #!/bin/bash
 
+git submodule update --init --recursive
+
+python -m venv env
+
 source env/bin/activate
 
 source ./set-env.sh
