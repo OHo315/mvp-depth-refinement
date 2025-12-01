@@ -1,6 +1,4 @@
-#!/bin/bash
-
-export WORKSPACE_DIR="$(dirname $0)/.."
+export WORKSPACE_DIR="$(dirname $0)/../.."
 export PYTHONPATH="$WORKSPACE_DIR":$PYTHONPATH
 
 accelerate launch ppd_sharpdepth/training/train.py \
@@ -19,7 +17,7 @@ accelerate launch ppd_sharpdepth/training/train.py \
     --tracker_project_name ppd_sharpdepth_train \
     --set_grads_to_none \
     --checkpointing_steps 5000 \
-    --validation_steps 2000 \
+    --validation_steps 100 \
     --train_batch_size 1 \
     --gradient_accumulation_steps 8 \
     --num_train_epochs 6 \
@@ -27,5 +25,5 @@ accelerate launch ppd_sharpdepth/training/train.py \
     --base_data_dir "$WORKSPACE_DIR/data/" \
     --config "$WORKSPACE_DIR/config/train_marigold_depth.yaml" \
     --output_dir "$WORKSPACE_DIR/train_output/" \
-    --base_model depth_anything_small \
+    --base_model unidepth \
     --denoiser pixel_perfect_depth

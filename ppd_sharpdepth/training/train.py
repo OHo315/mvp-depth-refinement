@@ -822,6 +822,7 @@ if "__main__" == __name__:
         desc="Steps",
         # Only show the progress bar once on each machine.
         disable=not accelerator.is_local_main_process,
+        dynamic_ncols=True,
     )
     device = accelerator.device
 
