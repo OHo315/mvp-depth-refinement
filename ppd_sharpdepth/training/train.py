@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
+from ppd_sharpdepth.sharpdepth.util.alignment import align_depth_least_square
+
 os.environ["XFORMERS_DISABLED"] = "1"
 
 from diffusers.models.attention_processor import AttnProcessor2_0
@@ -376,6 +378,7 @@ if "__main__" == __name__:
     parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA model.")
     parser.add_argument("--base_model", type=str, default="unidepth", help="Base model to use for depth estimation. Options: unidepth, depth_anything_small, depth_anything_large, pixel_perfect_depth")
     parser.add_argument("--denoiser", type=str, default="lotus", help="Which model constitutes SharpDepth. Options: lotus, pixel_perfect_depth")
+    parser.add_argument("--use_conditioning_probability", type=float, default=0.8, help="Probability of using conditioning in the student denoiser")
 
     args = parser.parse_args()
 
@@ -709,6 +712,9 @@ if "__main__" == __name__:
     student_denoiser, frozen_denoiser, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         student_denoiser, frozen_denoiser, optimizer, train_dataloader, lr_scheduler
     )
+
+    unwrapped_frozen_denoiser = unwrap_model(frozen_denoiser)
+    unwrapped_student_denoiser = unwrap_model(student_denoiser)
     # ---------------------------------------------------------------------
 
     # -------------------- Set up training precision --------------------
@@ -830,6 +836,29 @@ if "__main__" == __name__:
     alphas_cumprod = alphas_cumprod.to(device)
     depth_normalizer = ScaleShiftNormalizer()
     # ---------------------------------------------------------------------
+
+    # we keep an EMA of different kinds of losses
+    # for logging purposes only!
+    # because the loss is not present in all batches
+    # and when it is, it might appear more times in one batch than another
+
+    conditioning_kinds = ["no_cond","cond", "all"]
+    loss_keys = ["total","sds","depth","initial_depth"]
+
+    # initialize EMA buffers at 0
+    loss_exponential_moving_averages = { conditioning_kind: { loss_key: 0.0 for loss_key in loss_keys } for conditioning_kind in conditioning_kinds }
+    loss_ema_decay_rate = 0.5 # decays 50% for every training example
+
+    def update_loss_exponential_moving_averages(losses_and_counts):
+        for conditioning_kind in conditioning_kinds:
+            for loss_key in loss_keys:
+                new_loss, new_loss_averaged_over_n_examples = losses_and_counts[conditioning_kind][loss_key]
+                old_loss = loss_exponential_moving_averages[conditioning_kind][loss_key]
+
+                new_loss = old_loss * (loss_ema_decay_rate ** new_loss_averaged_over_n_examples) + new_loss * (1 - loss_ema_decay_rate ** new_loss_averaged_over_n_examples)
+
+                loss_exponential_moving_averages[conditioning_kind][loss_key] = new_loss
+
 
     for epoch in range(first_epoch, args.num_train_epochs):
         student_denoiser.train()
@@ -958,12 +987,14 @@ if "__main__" == __name__:
                         )
 
                         # ah ok, a simple way to mitigate catastrophic forgetting. makes sense, I think.
-                        if np.random.rand() < 0.8:
+                        if np.random.rand() < args.use_conditioning_probability:
+                            conditioning_kind = "cond"
                             noisy_latent = noisy_lotus_latent * latent_mask + unidepth_latent * (
                                 1 - latent_mask
                             )
                             student_input = torch.cat([rgb_latent, noisy_latent], dim=1)
                         else:
+                            conditioning_kind = "no_cond"
                             student_input = torch.cat([rgb_latent, noise], dim=1)
 
                     # ---------------------------------
@@ -1009,6 +1040,25 @@ if "__main__" == __name__:
                     depth_loss = l1_loss(
                         pred_depth * 0.5 + 0.5, norm_base_depth * 0.5 + 0.5, l1_error
                     )
+
+                    # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
+
+                    with torch.no_grad():
+
+                        frozen_pred_depth_aligned, _, _ = align_depth_least_square(
+                            gt_arr=(norm_base_depth * 0.5 + 0.5).detach().float().cpu().numpy(),
+                            pred_arr=frozen_pred_depth.detach().float().cpu().numpy(),
+                            valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
+                            return_scale_shift=True,
+                            max_resolution=None,
+                        )
+                        frozen_pred_depth_aligned = torch.from_numpy(frozen_pred_depth_aligned).to(device)
+
+                        initial_depth_loss = l1_loss(
+                            frozen_pred_depth_aligned, norm_base_depth * 0.5 + 0.5, l1_error
+                        )
+
+
                 
                 elif sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
 
@@ -1019,12 +1069,12 @@ if "__main__" == __name__:
                         cond = rgb - 0.5
                         noise = torch.randn(size=[cond.shape[0], 1, cond.shape[2], cond.shape[3]]).to(device)
                         with torch.autocast(device.type,dtype=weight_dtype):
-                            semantics = frozen_denoiser.semantics_prompt(rgb)
+                            semantics = unwrapped_frozen_denoiser.semantics_prompt(rgb)
                             latent = noise
-                            for timestep in student_denoiser.sampling_timesteps:
+                            for timestep in unwrapped_student_denoiser.sampling_timesteps:
                                 input = torch.cat([latent, cond], dim=1)
-                                pred = frozen_denoiser.dit(x=input, semantics=semantics, timestep=timestep)
-                                latent = student_denoiser.sampler.step(pred=pred, x_t=latent, t=timestep)
+                                pred = frozen_denoiser(x=input, semantics=semantics, timestep=timestep)
+                                latent = unwrapped_student_denoiser.sampler.step(pred=pred, x_t=latent, t=timestep)
                             frozen_pred_depth = latent + 0.5
                     
                         # ---------------------------------
@@ -1034,47 +1084,65 @@ if "__main__" == __name__:
                         l1_error = l1_error.clip(0, 1)
                         l1_mask = l1_error
                         
-                        timestep = student_denoiser.sampling_timesteps[random.randrange(0, len(student_denoiser.sampling_timesteps) - 1)]
+                        timestep = unwrapped_student_denoiser.sampling_timesteps[random.randrange(0, len(unwrapped_student_denoiser.sampling_timesteps) - 1)]
 
-                        should_use_conditioning = np.random.rand() < 0.8
+                        should_use_conditioning = np.random.rand() < args.use_conditioning_probability
                         if should_use_conditioning:
+                            conditioning_kind = "cond"
                             x0 = norm_base_depth - 0.5
                             noisy_depth_cond = norm_base_depth * (1 - l1_mask) + (torch.randn_like(x0) * l1_mask)
                             xT = torch.randn_like(latent)
 
-                            xt = student_denoiser.schedule.forward(x0, xT, timestep)
+                            xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
 
                             student_input = torch.cat([xt, cond, noisy_depth_cond], dim=1)
                         else:
+                            conditioning_kind = "no_cond"
                             x0 = frozen_pred_depth - 0.5
                             xT = noise
-                            xt = student_denoiser.schedule.forward(x0, xT, timestep)
+                            xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
                             noisy_depth_cond = torch.randn_like(xt)
 
                             student_input = torch.cat([xt, cond, noisy_depth_cond], dim=1)
                     
                     with torch.autocast(device.type,dtype=weight_dtype):
-                        student_pred_depth_latent_velocity = student_denoiser.dit(x=student_input, semantics=semantics, timestep=timestep)
-                        student_pred_depth_latent, _ = student_denoiser.schedule.convert_from_pred(student_pred_depth_latent_velocity, 'velocity', xt, timestep)
+                        student_pred_depth_latent_velocity = student_denoiser(x=student_input, semantics=semantics, timestep=timestep)
+                        student_pred_depth_latent, _ = unwrapped_student_denoiser.schedule.convert_from_pred(student_pred_depth_latent_velocity, 'velocity', xt, timestep)
                         pred_depth = student_pred_depth = student_pred_depth_latent + 0.5
-                    
 
                         # SDS loss
                         noise = torch.randn_like(student_pred_depth_latent)
-                        noised_student_pred_depth_latent = student_denoiser.schedule.forward(student_pred_depth_latent, noise, timestep)
+                        noised_student_pred_depth_latent = unwrapped_student_denoiser.schedule.forward(student_pred_depth_latent, noise, timestep)
                         with torch.no_grad():
                             frozen_denoiser_input = torch.cat([noised_student_pred_depth_latent, cond], dim=1)
-                            frozen_denoiser_pred_depth_latent_velocity = frozen_denoiser.dit(frozen_denoiser_input, semantics=semantics, timestep=timestep)
-                            frozen_denoiser_pred_depth_latent, pred_noise = frozen_denoiser.schedule.convert_from_pred(frozen_denoiser_pred_depth_latent_velocity, 'velocity', noised_student_pred_depth_latent, timestep)
+                            frozen_denoiser_pred_depth_latent_velocity = frozen_denoiser(frozen_denoiser_input, semantics=semantics, timestep=timestep)
+                            frozen_denoiser_pred_depth_latent, pred_noise = unwrapped_frozen_denoiser.schedule.convert_from_pred(frozen_denoiser_pred_depth_latent_velocity, 'velocity', noised_student_pred_depth_latent, timestep)
 
                             # TODO figure out if the sign should be reversed here
                             score_vector = (pred_noise - noise)
                         
-                    sds_loss = (student_pred_depth_latent * score_vector).mean()
+                    sds_loss = 0.5 * F.mse_loss(student_pred_depth_latent, (student_pred_depth_latent - score_vector).detach(), reduction="mean")
 
                     depth_loss = l1_loss(
-                        student_pred_depth_latent, x0, l1_error
+                        student_pred_depth_latent + 0.5, x0 + 0.5, l1_error
                     )
+
+                    # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
+
+                    with torch.no_grad():
+
+                        frozen_pred_depth_aligned, _, _ = align_depth_least_square(
+                            gt_arr=(x0 + 0.5).detach().float().cpu().numpy(),
+                            pred_arr=frozen_pred_depth.detach().float().cpu().numpy(),
+                            valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
+                            return_scale_shift=True,
+                            max_resolution=None,
+                        )
+                        frozen_pred_depth_aligned = torch.from_numpy(frozen_pred_depth_aligned).to(device)
+
+                        initial_depth_loss = l1_loss(
+                            frozen_pred_depth_aligned, x0 + 0.5, l1_error
+                        )
 
                 else:
                     raise NotImplementedError(f"Image resizing not implemented for denoiser={sharpdepth_kind}")
@@ -1277,6 +1345,7 @@ if "__main__" == __name__:
                                     
                                 # put them in a grid and log to wandb and filesystem
                                 keys = set(images[0][0].keys())
+                                wandb_log_obj = {}
                                 for k in keys:
                                     img_list = []
                                     for loader_imgs in images:
@@ -1300,16 +1369,40 @@ if "__main__" == __name__:
                                         grid.paste(img, (col * img_w, row * img_h))
                                     
                                     grid.save(os.path.join(saved_dir, f"grid_{k}.jpg"))
-                                    wandb_tracker.log({f"grid_{k}": wandb.Image(grid)})
+                                    wandb_log_obj[f"grid_{k}"] = wandb.Image(grid)
+                                wandb_tracker.log(wandb_log_obj)
 
                             del pipeline
                             torch.cuda.empty_cache()
                             student_denoiser.train()
+                
+                # we have a value for each of these losses, summed over 1 example (since our microbatch size is 1).
+                # hence the (loss, 1) tuples.
+                losses_and_counts = {
+                    conditioning_kind:{
+                        "total": (loss.detach(), torch.tensor(1,device=loss.device)),
+                        "sds": (sds_loss.detach(), torch.tensor(1,device=sds_loss.device)),
+                        "depth": (depth_loss.detach(), torch.tensor(1,device=depth_loss.device)),
+                        "initial_depth": (initial_depth_loss.detach(), torch.tensor(1,device=initial_depth_loss.device)),
+                    },
+                    "all": {
+                        "total": (loss.detach(), torch.tensor(1,device=loss.device)),
+                        "sds": (sds_loss.detach(), torch.tensor(1,device=sds_loss.device)),
+                        "depth": (depth_loss.detach(), torch.tensor(1,device=depth_loss.device)),
+                        "initial_depth": (initial_depth_loss.detach(), torch.tensor(1,device=initial_depth_loss.device)),
+                    },
+                    **{empty_conditioning_kind:{loss_key:(torch.tensor(0,device=device),torch.tensor(0,device=device)) for loss_key in loss_keys} for empty_conditioning_kind in conditioning_kinds if empty_conditioning_kind not in [conditioning_kind, "all"]}
+                }
+
+                # average the losses and counts across devices!
+                if accelerator.num_processes > 1:
+                    accumulated_losses_and_counts = accelerator.reduce(losses_and_counts, reduction="sum")
+                    losses_and_counts = {conditioning_kind: {loss_key: (torch.nan_to_num(loss_accum / num_examples.float(), nan=0.0), num_examples) for loss_key, (loss_accum, num_examples) in accumulated_losses_and_counts[conditioning_kind].items()} for conditioning_kind in conditioning_kinds}
+
+                update_loss_exponential_moving_averages(losses_and_counts)
 
                 logs = {
-                    "loss": loss.detach().item(),
-                    "sds_loss": sds_loss.detach().item(),
-                    "depth_loss": depth_loss.detach().item(),
+                    **{f"loss_{conditioning_kind}_{loss_key}": round(loss_exponential_moving_averages[conditioning_kind][loss_key].item(), 4) for conditioning_kind in conditioning_kinds for loss_key in loss_keys},
                     "lr": lr_scheduler.get_last_lr()[0],
                 }
                 progress_bar.set_postfix(**logs)

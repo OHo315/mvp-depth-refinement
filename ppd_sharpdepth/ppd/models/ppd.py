@@ -96,3 +96,7 @@ class PixelPerfectDepth(ModelMixin, ConfigMixin):
         with torch.no_grad():
             semantics = self.semantics_encoder(image_rgb_hwc)
         return semantics
+    
+    # we define forward() to just be .dit() since .dit is the only trainable part of the network
+    def forward(self, *args, **kwargs):
+        return self.dit(*args, **kwargs)

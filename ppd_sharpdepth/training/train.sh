@@ -17,7 +17,7 @@ accelerate launch ppd_sharpdepth/training/train.py \
     --learning_rate 1e-5 \
     --scale_lr \
     --lr_scheduler cosine \
-    --lr_warmup_steps 100 \
+    --lr_warmup_steps 50 \
     --tracker_project_name ppd_sharpdepth_train \
     --set_grads_to_none \
     --checkpointing_steps 5000 \
@@ -30,4 +30,5 @@ accelerate launch ppd_sharpdepth/training/train.py \
     --config "$WORKSPACE_DIR/config/train_marigold_depth.yaml" \
     --output_dir "$WORKSPACE_DIR/train_output/" \
     --base_model unidepth \
-    --denoiser pixel_perfect_depth
+    --denoiser pixel_perfect_depth \
+    --use_conditioning_probability 0.8

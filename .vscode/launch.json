@@ -20,7 +20,7 @@
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
       "env": {
-        "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}",
+        "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}"
       },
       "args": [
         "--depth_weight", "0.4",
@@ -30,12 +30,11 @@
         "--report_to", "wandb",
         "--mixed_precision", "bf16",
         "--seed", "42",
-        // "--enable_xformers_memory_efficient_attention",
         "--allow_tf32",
-        "--learning_rate", "1e-6",
+        "--learning_rate", "1e-5",
         "--scale_lr",
         "--lr_scheduler", "cosine",
-        "--lr_warmup_steps", "200",
+        "--lr_warmup_steps", "100",
         "--tracker_project_name", "ppd_sharpdepth_train",
         "--set_grads_to_none",
         "--checkpointing_steps", "5000",
@@ -47,9 +46,9 @@
         "--base_data_dir", "${workspaceFolder}/data/",
         "--config", "${workspaceFolder}/config/train_marigold_depth.yaml",
         "--output_dir", "${workspaceFolder}/train_output/",
-        "--base_model", "unidepth", // TODO fix depth anything and switch back to it
-        // "--use_sdpa",
-        "--denoiser", "pixel_perfect_depth"
+        "--base_model", "unidepth",
+        "--denoiser", "pixel_perfect_depth",
+        "--use_conditioning_probability", "0.5"
       ]
     },
   ]
