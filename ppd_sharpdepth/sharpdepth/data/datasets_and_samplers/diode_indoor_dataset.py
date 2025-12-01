@@ -8,7 +8,7 @@ import numpy as np
 import os
 from PIL import Image
 
-class DiodeDataset(BaseDepthDataset):
+class DiodeIndoorDataset(BaseDepthDataset):
     def __init__(
         self,
         **kwargs,

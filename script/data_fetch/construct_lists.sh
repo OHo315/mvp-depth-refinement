@@ -1,12 +1,12 @@
 DIODE_TXT_DIRPATH="$BASE_DATA_DIR/../data_split/diode_depth"
-DIODE_TXT_FILEPATH="$DIODE_TXT_DIRPATH/diode_train_indoor_filename_list.txt"
+DIODE_TXT_FILEPATH="$DIODE_TXT_DIRPATH/diode_indoor_train_filename_list.txt"
 DIODE_DATADIR=$BASE_DATA_DIR/diode
 mkdir -p $DIODE_TXT_DIRPATH
 find $DIODE_DATADIR -type f -name "*png" > $DIODE_TXT_FILEPATH
 sed -i "s|$DIODE_DATADIR/||g" $DIODE_TXT_FILEPATH
 
 ARKIT_TXT_DIRPATH="$BASE_DATA_DIR/../data_split/arkit_depth"
-ARKIT_TXT_FILEPATH="$ARKIT_TXT_DIRPATH/arkit_train_filename_list.txt"
+ARKIT_TXT_FILEPATH="$ARKIT_TXT_DIRPATH/arkitscenes_train_filename_list.txt"
 ARKIT_DATADIR=$BASE_DATA_DIR/arkitscenes_processed
 mkdir -p $ARKIT_TXT_DIRPATH
 find $ARKIT_DATADIR -type f -name "*png" > $ARKIT_TXT_FILEPATH

@@ -16,7 +16,9 @@ from .waymo_dataset import WaymoDataset
 from .sintel_dataset import SintelDataset
 from .unrealstereo_dataset import UnrealStereoDataset
 from .spring_dataset import SpringDataset
-from .diode_dataset import DiodeDataset
+from .diode_indoor_dataset import DiodeIndoorDataset
+from .arkitscenes_dataset import ARKitScenesDataset
+from .hypersim_dataset import HypersimDataset
 
 dataset_name_class_dict = {
     "kitti": KITTIDataset,
@@ -26,7 +28,9 @@ dataset_name_class_dict = {
     "sintel": SintelDataset,
     "unrealstereo": UnrealStereoDataset,
     "spring": SpringDataset,
-    "diode_indoor": DiodeDataset
+    "diode_indoor": DiodeIndoorDataset,
+    "arkitscenes": ARKitScenesDataset,
+    "hypersim": HypersimDataset
 }
 
 
