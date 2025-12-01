@@ -52,8 +52,10 @@ class SharpDepthOutput(BaseOutput):
 
     depth_np: np.ndarray
     depth_base_np: np.ndarray
+    depth_initial_np: np.ndarray
     depth_colored: Union[None, Image.Image]
     depth_base_colored: Union[None, np.ndarray]
+    depth_initial_colored: Union[None, np.ndarray]
     pred_mask: Union[None, Image.Image]
 
 class SharpDepthPipeline(DiffusionPipeline):
@@ -262,6 +264,7 @@ class SharpDepthPipeline(DiffusionPipeline):
             latent = lotus_pred / self.vae.config.scaling_factor
             z = self.vae.post_quant_conv(latent.to(self.vae.dtype))
             lotus_depth = self.vae.decoder(z).mean(dim=1, keepdim=True)
+            lotus_depth_initial = lotus_depth
             
             # compute difference mask
             l1_error            = torch.abs(lotus_depth -  norm_disp_base)
@@ -333,21 +336,25 @@ class SharpDepthPipeline(DiffusionPipeline):
         if self.sharpdepth_kind == SharpDepthKind.LOTUS:
             final_pred = self.image_processor.unpad_image(lotus_depth, padding)  # [N*E,1,PH,PW]
             base_pred = self.image_processor.unpad_image(depth_base, padding)  # [N*E,1,PH,PW]
+            initial_pred = self.image_processor.unpad_image(lotus_depth_initial, padding)  # [N*E,1,PH,PW]
             l1_error = self.image_processor.unpad_image(l1_error, padding)  # [N*E,1,PH,PW]
         elif self.sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
             final_pred = student_pred_depth
             base_pred = depth_base_11hw
+            initial_pred = frozen_pred_depth
             l1_error = l1_error
         else:
             raise NotImplementedError(f"SharpDepthKind {self.sharpdepth_kind} not implemented yet")
         
         final_pred = self.image_processor.resize_antialias(final_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
         base_pred = self.image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+        initial_pred = self.image_processor.resize_antialias(initial_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
         l1_error = self.image_processor.resize_antialias(l1_error, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
 
         # Convert to numpy
         final_pred = final_pred.squeeze().float().cpu().numpy()
         base_pred = base_pred.squeeze().float().cpu().numpy()
+        initial_pred = initial_pred.squeeze().float().cpu().numpy()
         pred_mask = l1_error.squeeze().float().cpu().numpy()
 
         valid_mask = (1 - pred_mask) > 0.5
@@ -359,7 +366,15 @@ class SharpDepthPipeline(DiffusionPipeline):
                                                         return_scale_shift=True,
                                                         max_resolution=None,
                                                 )
-                                                
+        
+        initial_pred, scale, shift = align_depth_least_square(
+                                                        gt_arr=base_pred,
+                                                        pred_arr=initial_pred,
+                                                        valid_mask_arr=valid_mask,
+                                                        return_scale_shift=True,
+                                                        max_resolution=None,
+                                                )
+
         
         # Colorize
         if color_map is not None:
@@ -373,6 +388,11 @@ class SharpDepthPipeline(DiffusionPipeline):
             depth_colored_hwc = chw2hwc(depth_colored)
             depth_base_colored_img = Image.fromarray(depth_colored_hwc)
 
+            depth_colored = colorize_depth_maps(initial_pred, 0, initial_pred.max(), cmap=color_map).squeeze()
+            depth_colored = (depth_colored * 255).astype(np.uint8)
+            depth_colored_hwc = chw2hwc(depth_colored)
+            depth_initial_colored_img = Image.fromarray(depth_colored_hwc)
+
             depth_colored = colorize_depth_maps(pred_mask, 0, 1, cmap="coolwarm").squeeze() 
             depth_colored = (depth_colored * 255).astype(np.uint8)
             depth_colored_hwc = chw2hwc(depth_colored)
@@ -381,13 +401,16 @@ class SharpDepthPipeline(DiffusionPipeline):
         else:
             depth_colored_img = None
             depth_base_colored_img = None
+            depth_initial_colored_img = None
             pred_mask_img = None
 
         return SharpDepthOutput(
             depth_np=final_pred,
             depth_base_np=base_pred,
+            depth_initial_np=initial_pred,
             depth_colored=depth_colored_img,
             depth_base_colored=depth_base_colored_img,
+            depth_initial_colored=depth_initial_colored_img,
             pred_mask=pred_mask_img,
         )
 

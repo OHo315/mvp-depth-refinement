@@ -1191,6 +1191,9 @@ if "__main__" == __name__:
                                         depth_base_np = torch.from_numpy(out.depth_base_np).to(
                                             accelerator.device
                                         )
+                                        depth_initial_np = torch.from_numpy(out.depth_initial_np).to(
+                                            accelerator.device
+                                        )
 
                                         gt = (
                                             batch["depth_raw_linear"]
@@ -1221,33 +1224,41 @@ if "__main__" == __name__:
                                         Image.fromarray(error_uni_col).save(
                                             os.path.join(
                                                 saved_dir,
-                                                f"vis_unidepth_error_{loader_idx}_{vis_idx}.jpg",
+                                                f"vis_base_error_{loader_idx}_{vis_idx}.jpg",
                                             )
                                         )
-                                        vis_imgs["vis_unidepth_error"] = Image.fromarray(error_uni_col)
+                                        vis_imgs["vis_base_error"] = Image.fromarray(error_uni_col)
 
                                         Image.fromarray(error_col).save(
                                             os.path.join(
                                                 saved_dir,
-                                                f"vis_pred_depth_error_{loader_idx}_{vis_idx}.jpg",
+                                                f"vis_final_error_{loader_idx}_{vis_idx}.jpg",
                                             )
                                         )
-                                        vis_imgs["vis_pred_depth_error"] = Image.fromarray(error_col)
+                                        vis_imgs["vis_final_error"] = Image.fromarray(error_col)
 
                                         out.depth_colored.save(
                                             os.path.join(
                                                 saved_dir,
-                                                f"vis_pred_depth_{loader_idx}_{vis_idx}.jpg",
+                                                f"vis_final_{loader_idx}_{vis_idx}.jpg",
                                             )
                                         )
-                                        vis_imgs["vis_pred_depth"] = out.depth_colored
+                                        vis_imgs["vis_final"] = out.depth_colored
                                         out.depth_base_colored.save(
                                             os.path.join(
                                                 saved_dir,
-                                                f"vis_unidepth_{loader_idx}_{vis_idx}.jpg",
+                                                f"vis_base_{loader_idx}_{vis_idx}.jpg",
                                             )
                                         )
-                                        vis_imgs["vis_unidepth"] = out.depth_base_colored
+                                        vis_imgs["vis_base"] = out.depth_base_colored
+
+                                        out.depth_initial_colored.save(
+                                            os.path.join(
+                                                saved_dir,
+                                                f"vis_initial_{loader_idx}_{vis_idx}.jpg",
+                                            )
+                                        )
+                                        vis_imgs["vis_initial"] = out.depth_initial_colored
 
                                         out.pred_mask.save(
                                             os.path.join(
