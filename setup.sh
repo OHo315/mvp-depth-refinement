@@ -11,18 +11,23 @@ source ./set-env.sh
 echo "" >> ~/.bashrc
 cat set-env.sh >> ~/.bashrc
 
-echo "Installing top-level dependencies"
+echo "Installing top-level dependencies..."
 
 pip install -qr requirements++.txt -r requirements+.txt -r requirements.txt
 
-pushd submodules/UniDepth
+echo "Done installing top-level dependencies"
 
-echo "Installing UniDepth in top-level environment"
+pushd submodules/UniDepth > /dev/null
 
-pip install -v -e . --no-deps
+if ! python -c "import unidepth" &>/dev/null; then
+  echo "Installing UniDepth in top-level environment"
+  pip install -v -e . --no-deps
+fi
 
-echo "Installing a custom op used by UniDepth. This will build some C++ code"
-cd unidepth/ops/knn
-python setup.py build install
+if ! python -c "import torch; import KNN" &>/dev/null; then
+  echo "Installing a custom op used by UniDepth. This will build some C++ code"
+  cd unidepth/ops/knn
+  python setup.py build install
+fi
 
-popd
+popd > /dev/null
