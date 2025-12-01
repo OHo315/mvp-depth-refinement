@@ -52,6 +52,8 @@ from ppd_sharpdepth.sharpdepth.util.logging_util import config_logging
 from ppd_sharpdepth.sharpdepth.util.normalizer import ScaleShiftNormalizer
 from ppd_sharpdepth.ppd.models.ppd import PixelPerfectDepth
 
+import wandb
+
 logger = get_logger(__name__)
 
 
@@ -587,7 +589,6 @@ if "__main__" == __name__:
     frozen_denoiser = denoiser_cls.from_pretrained(
         base_ckpt_dir, subfolder=frozen_denoiser_subfolder, revision=None
     )
-    # unidepth = UniDepthV1.from_pretrained("lpiccinelli/unidepth-v1-vitl14")
 
     vae.requires_grad_(False)
     frozen_denoiser.requires_grad_(False)
@@ -597,6 +598,9 @@ if "__main__" == __name__:
         student_ckpt_dir, subfolder=denoiser_subfolder, revision=None
     )
     student_denoiser.requires_grad_(True)
+    if sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
+        student_denoiser.semantics_encoder.requires_grad_(False)
+
     # ---------------------------------------------------------------------
 
     # -------------------- EMA model --------------------
@@ -1007,6 +1011,8 @@ if "__main__" == __name__:
                 
                 elif sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
 
+                    norm_base_depth = norm_base_depth * 0.5 + 0.5
+
                     # initial PPD
                     with torch.no_grad():
                         cond = rgb - 0.5
@@ -1027,12 +1033,12 @@ if "__main__" == __name__:
                         l1_error = l1_error.clip(0, 1)
                         l1_mask = l1_error
                         
-                        timestep = student_denoiser.sampling_timesteps[random.randrange(0, len(student_denoiser.sampling_timesteps) - 1)] - 1
+                        timestep = student_denoiser.sampling_timesteps[random.randrange(0, len(student_denoiser.sampling_timesteps) - 1)]
 
                         should_use_conditioning = np.random.rand() < 0.8
                         if should_use_conditioning:
                             x0 = norm_base_depth - 0.5
-                            noisy_depth_cond = norm_base_depth * l1_mask + (torch.randn_like(x0) * (1 - l1_mask))
+                            noisy_depth_cond = norm_base_depth * (1 - l1_mask) + (torch.randn_like(x0) * l1_mask)
                             xT = torch.randn_like(latent)
 
                             xt = student_denoiser.schedule.forward(x0, xT, timestep)
@@ -1054,16 +1060,12 @@ if "__main__" == __name__:
 
                         # SDS loss
                         noise = torch.randn_like(student_pred_depth_latent)
-                        noised_student_pred_depth_latent = noise_scheduler.add_noise(student_pred_depth_latent, noise, timestep)
+                        noised_student_pred_depth_latent = student_denoiser.schedule.forward(student_pred_depth_latent, noise, timestep)
                         with torch.no_grad():
                             frozen_denoiser_input = torch.cat([noised_student_pred_depth_latent, cond], dim=1)
                             frozen_denoiser_pred_depth_latent_velocity = frozen_denoiser.dit(frozen_denoiser_input, semantics=semantics, timestep=timestep)
-                            frozen_denoiser_pred_depth_latent = frozen_denoiser.schedule.convert_from_pred(frozen_denoiser_pred_depth_latent_velocity, 'velocity', noised_student_pred_depth_latent, timestep)
+                            frozen_denoiser_pred_depth_latent, pred_noise = frozen_denoiser.schedule.convert_from_pred(frozen_denoiser_pred_depth_latent_velocity, 'velocity', noised_student_pred_depth_latent, timestep)
 
-                            pred_noise, _ = frozen_denoiser.schedule.convert_from_pred(frozen_denoiser_pred_depth_latent_velocity, 'velocity', noised_student_pred_depth_latent, timestep)
-
-                            # we don't need to multiply by a constant (e.g. sigma squared) b/c PPD uses a linear diffusion schedule. so velocity = epsilon / 1000
-                            # TODO check if the linear diffusion schedule actually makes this ^^ true
                             # TODO figure out if the sign should be reversed here
                             score_vector = (pred_noise - noise)
                         
@@ -1149,7 +1151,7 @@ if "__main__" == __name__:
 
                             default_processing_resolution = {
                                 SharpDepthKind.LOTUS: 768,
-                                SharpDepthKind.PIXEL_PERFECT_DEPTH: 1024, # TODO sanity check this?
+                                SharpDepthKind.PIXEL_PERFECT_DEPTH: 1024,
                             }[sharpdepth_kind]
 
                             pipeline = SharpDepthPipeline.from_pretrained(
@@ -1208,30 +1210,55 @@ if "__main__" == __name__:
                                         error_uni_col = colorize(
                                             error_uni.cpu().numpy(), 0, 0.12, cmap="coolwarm"
                                         )
+
+                                        if args.report_to == "wandb":
+                                            wandb_tracker = accelerator.get_tracker("wandb")
+
                                         Image.fromarray(error_uni_col).save(
                                             os.path.join(
                                                 saved_dir,
                                                 f"vis_unidepth_error_{loader_idx}_{vis_idx}.jpg",
                                             )
                                         )
+                                        wandb_tracker.log(
+                                            {
+                                                "vis_unidepth_error": wandb.Image(Image.fromarray(error_uni_col)),
+                                            }
+                                        )
+
                                         Image.fromarray(error_col).save(
                                             os.path.join(
                                                 saved_dir,
                                                 f"vis_pred_depth_error_{loader_idx}_{vis_idx}.jpg",
                                             )
                                         )
+                                        wandb_tracker.log(
+                                            {
+                                                "vis_pred_depth_error": wandb.Image(Image.fromarray(error_col)),
+                                            }
+                                        )
 
                                         out.depth_colored.save(
                                             os.path.join(
                                                 saved_dir,
-                                                f"vis_pred_depth_{loader_idx}_{vis_idx}_{error.mean()}.jpg",
+                                                f"vis_pred_depth_{loader_idx}_{vis_idx}.jpg",
                                             )
+                                        )
+                                        wandb_tracker.log(
+                                            {
+                                                "vis_pred_depth": wandb.Image(out.depth_colored),
+                                            }
                                         )
                                         out.depth_base_colored.save(
                                             os.path.join(
                                                 saved_dir,
-                                                f"vis_unidepth_{loader_idx}_{vis_idx}_{error_uni.mean()}.jpg",
+                                                f"vis_unidepth_{loader_idx}_{vis_idx}.jpg",
                                             )
+                                        )
+                                        wandb_tracker.log(
+                                            {
+                                                "vis_unidepth": wandb.Image(out.depth_base_colored),
+                                            }
                                         )
 
                                         out.pred_mask.save(
@@ -1240,10 +1267,20 @@ if "__main__" == __name__:
                                                 f"vis_diff_mask_{loader_idx}_{vis_idx}.jpg",
                                             )
                                         )
+                                        wandb_tracker.log(
+                                            {
+                                                "vis_diff_mask": wandb.Image(out.pred_mask),
+                                            }
+                                        )
                                         rgb.save(
                                             os.path.join(
                                                 saved_dir, f"vis_rgb_{loader_idx}_{vis_idx}.jpg"
                                             )
+                                        )
+                                        wandb_tracker.log(
+                                            {
+                                                "vis_rgb": wandb.Image(rgb),
+                                            }
                                         )
 
                             del pipeline
@@ -1252,6 +1289,7 @@ if "__main__" == __name__:
 
                 logs = {
                     "loss": loss.detach().item(),
+                    "sds_loss": sds_loss.detach().item(),
                     "depth_loss": depth_loss.detach().item(),
                     "lr": lr_scheduler.get_last_lr()[0],
                 }

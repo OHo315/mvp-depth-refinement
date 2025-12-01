@@ -294,6 +294,7 @@ class SharpDepthPipeline(DiffusionPipeline):
 
             normalize_obj = self.depth_normalizer(depth_base_11hw)
             norm_base_depth = normalize_obj["norm_depth"].to(dtype=self.unet.dtype)
+            norm_base_depth = norm_base_depth * 0.5 + 0.5
 
             # initial PPD
             cond = rgb_float_1chw - 0.5
@@ -313,17 +314,16 @@ class SharpDepthPipeline(DiffusionPipeline):
             l1_error = l1_error.clip(0, 1)
             l1_mask = l1_error
 
-            noisy_depth_cond = norm_base_depth * l1_mask + (torch.randn_like(norm_base_depth) * (1 - l1_mask))
+            noisy_depth_cond = norm_base_depth * (1 - l1_mask) + (torch.randn_like(norm_base_depth) * l1_mask)
 
             # second PPD
             noise = torch.randn_like(noise)
             with torch.autocast(self.device.type,dtype=self.unet.dtype):
-                semantics = self.frozen_unet.semantics_prompt(rgb_float_1chw)
                 latent = noise
-                for timestep in self.frozen_unet.sampling_timesteps:
+                for timestep in self.unet.sampling_timesteps:
                     student_input = torch.cat([latent, cond, noisy_depth_cond], dim=1)
-                    pred = self.frozen_unet.dit(x=input, semantics=semantics, timestep=timestep)
-                    latent = self.frozen_unet.sampler.step(pred=pred, x_t=latent, t=timestep)
+                    pred = self.unet.dit(x=student_input, semantics=semantics, timestep=timestep)
+                    latent = self.unet.sampler.step(pred=pred, x_t=latent, t=timestep)
                 student_pred_depth = latent + 0.5
 
         else:
