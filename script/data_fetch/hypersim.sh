@@ -4,7 +4,7 @@ source env/bin/activate
 
 mkdir -p $BASE_DATA_DIR/hypersim
 
-echo "Downloading (small) hypersim dataset and preprocess..."
+echo "Downloading hypersim dataset and preprocess..."
 python3 script/depth/dataset_preprocess/hypersim/dataset_download_images_and_preprocess.py \
   --downloads_dir $BASE_DATA_DIR/hypersim \
   --decompress_dir $BASE_DATA_DIR/hypersim \
