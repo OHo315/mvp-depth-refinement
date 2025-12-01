@@ -1,0 +1,4 @@
+name: diode_indoor_depth
+disp_name: diode_indoor_depth_train
+dir: diode
+filenames: data_split/diode_depth/diode_indoor_train_filename_list.txt

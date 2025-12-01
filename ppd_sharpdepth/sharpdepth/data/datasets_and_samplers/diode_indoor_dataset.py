@@ -8,14 +8,15 @@ import numpy as np
 import os
 from PIL import Image
 
-class WaymoDataset(BaseDepthDataset):
+class DiodeIndoorDataset(BaseDepthDataset):
     def __init__(
         self,
         **kwargs,
     ) -> None:
         super().__init__(
-            min_depth=1e-5,
-            max_depth=100,
+            # NOTE: Copied from marigold. Seems kind of weird that the same vals are used for indoor and outdoor?
+            min_depth=0.6,
+            max_depth=350,
             has_filled_depth=False,
             name_mode=DepthFileNameMode.id,
             **kwargs,

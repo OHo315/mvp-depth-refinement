@@ -521,7 +521,8 @@ if "__main__" == __name__:
     train_dataset: BaseDepthDataset = get_dataset(
         cfg_data.train,
         base_data_dir=base_data_dir,
-        mode=DatasetMode.TRAIN,
+        #mode=DatasetMode.TRAIN,
+        mode=DatasetMode.RGB_ONLY,
         augmentation_args=cfg.augmentation,
     )
 
@@ -864,7 +865,8 @@ if "__main__" == __name__:
         student_denoiser.train()
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(student_denoiser):
-                desired_batch_keys = {"rgb_int", "depth_raw_linear", "valid_mask_raw"}
+                #desired_batch_keys = {"rgb_int", "depth_raw_linear", "valid_mask_raw"}
+                desired_batch_keys = {"rgb_int"}
                 assert set(batch.keys()) >= desired_batch_keys, f"Invalid batch keys: {set(batch.keys())}. expected it to contain at least these keys: {desired_batch_keys}"
                 batch = { key: batch[key] for key in desired_batch_keys }
 
@@ -883,20 +885,25 @@ if "__main__" == __name__:
                     rgb_float_1chw_resized = torch.from_numpy(resized_rgb_float_HpWpC).permute(2, 0, 1).unsqueeze(0).to(device=rgb.device, dtype=rgb.dtype)
                     rgb_int_1chw_resized = (rgb_float_1chw_resized * 255.0).to(batch["rgb_int"].dtype)
 
-                    depth_raw_linear_11hw = batch["depth_raw_linear"]
-                    depth_raw_linear_hw1 = batch["depth_raw_linear"].squeeze(0,1).unsqueeze(-1).cpu().numpy()
-                    depth_raw_linear_hw1_resized = cv2_interpolate(depth_raw_linear_hw1, (wp, hp))
-                    depth_raw_linear_11hw_resized = torch.from_numpy(depth_raw_linear_hw1_resized).squeeze(-1)[None,None,:,:].to(device=depth_raw_linear_11hw.device, dtype=depth_raw_linear_11hw.dtype)
-
-                    valid_mask_raw_11hw_bool = batch["valid_mask_raw"]
-                    valid_mask_raw_hw1_float = batch["valid_mask_raw"].squeeze(0,1).unsqueeze(-1).cpu().float().numpy()
-                    valid_mask_raw_hw1_float_resized = cv2_interpolate(valid_mask_raw_hw1_float, (wp, hp))
-                    valid_mask_raw_11hw_bool_resized = torch.from_numpy(valid_mask_raw_hw1_float_resized).squeeze(-1)[None,None,:,:].to(device=valid_mask_raw_11hw_bool.device, dtype=valid_mask_raw_11hw_bool.dtype)
-
+#                    depth_raw_linear_11hw = batch["depth_raw_linear"]
+#                    depth_raw_linear_hw1 = batch["depth_raw_linear"].squeeze(0,1).unsqueeze(-1).cpu().numpy()
+#                    depth_raw_linear_hw1_resized = cv2_interpolate(depth_raw_linear_hw1, (wp, hp))
+#                    depth_raw_linear_11hw_resized = torch.from_numpy(depth_raw_linear_hw1_resized).squeeze(-1)[None,None,:,:].to(device=depth_raw_linear_11hw.device, dtype=depth_raw_linear_11hw.dtype)
+#
+#                    valid_mask_raw_11hw_bool = batch["valid_mask_raw"]
+#                    valid_mask_raw_hw1_float = batch["valid_mask_raw"].squeeze(0,1).unsqueeze(-1).cpu().float().numpy()
+#                    valid_mask_raw_hw1_float_resized = cv2_interpolate(valid_mask_raw_hw1_float, (wp, hp))
+#                    valid_mask_raw_11hw_bool_resized = torch.from_numpy(valid_mask_raw_hw1_float_resized).squeeze(-1)[None,None,:,:].to(device=valid_mask_raw_11hw_bool.device, dtype=valid_mask_raw_11hw_bool.dtype)
+#
+                    #batch_resized = {
+                    #    "rgb_int":          rgb_int_1chw_resized,
+                    #    "depth_raw_linear": depth_raw_linear_11hw_resized,
+                    #    "valid_mask_raw":   valid_mask_raw_11hw_bool_resized,
+                    #}
                     batch_resized = {
                         "rgb_int":          rgb_int_1chw_resized,
-                        "depth_raw_linear": depth_raw_linear_11hw_resized,
-                        "valid_mask_raw":   valid_mask_raw_11hw_bool_resized,
+                        "depth_raw_linear": None,
+                        "valid_mask_raw":   None,
                     }
 
                     batch = batch_resized

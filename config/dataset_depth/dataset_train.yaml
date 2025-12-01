@@ -1,7 +1,8 @@
 dataset:
   train:
     name: mixed
-    prob_ls: [0.01, 0.2475, 0.2475, 0.2475 0.2475]
+    prob_ls: [0.01, 0.2475, 0.2475, 0.2475, 0.2475]
+      #prob_ls: [1.0]
     dataset_list:
     - name: nyu_v2
       disp_name: nyu_v2
@@ -28,14 +29,14 @@ dataset:
     - name: diode_indoor
       disp_name: diode_indoor
       dir: diode/
-      filenames: data_split/diode/diode_train_filename_list.txt
+      filenames: data_split/diode_indoor_depth/diode_indoor_train_filename_list.txt
       resize_to_hw:
       - 480
       - 640 
-    - name: arkit
-      disp_name: arkit 
+    - name: arkitscenes
+      disp_name: arkitscenes
       dir: arkitscenes_processed/
-      filenames: data_split/arkitscenes_depth/arkit_train_filename_list.txt
+      filenames: data_split/arkitscenes_depth/arkitscenes_train_filename_list.txt
       resize_to_hw:
       - 480
       - 640 

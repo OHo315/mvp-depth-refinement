@@ -5,6 +5,7 @@
 ```bash
 source ./setup.sh
 source ./script/data_fetch/data-fetch-small.sh
+source ./script/data_fetch/construct_lists.sh
 ```
 
 Run this to infer the internal version of the models on some demo images

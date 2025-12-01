@@ -1,4 +1,4 @@
 name: arkitscenes_depth
 disp_name: arkitscenes_depth_train
-dir: arkitscenes_processed/train
-filenames: data/arkitscenes_processed/train/filename_list_train.txt
+dir: arkitscenes_processed 
+filenames: data_split/arkitscenes_depth/arkitscenes_train_filename_list.txt

@@ -8,19 +8,19 @@ import numpy as np
 import os
 from PIL import Image
 
-class WaymoDataset(BaseDepthDataset):
+class HypersimDataset(BaseDepthDataset):
     def __init__(
         self,
         **kwargs,
     ) -> None:
         super().__init__(
+            # NOTE: Copied from marigold. Seems kind of weird that the same vals are used for indoor and outdoor?
             min_depth=1e-5,
-            max_depth=100,
+            max_depth=65.0,
             has_filled_depth=False,
-            name_mode=DepthFileNameMode.id,
+            name_mode=DepthFileNameMode.rgb_i_d,
             **kwargs,
         )
-
 
     def _load_rgb_data(self, rgb_rel_path):
         # Read RGB data

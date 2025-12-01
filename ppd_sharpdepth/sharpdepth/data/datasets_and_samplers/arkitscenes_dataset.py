@@ -8,14 +8,15 @@ import numpy as np
 import os
 from PIL import Image
 
-class WaymoDataset(BaseDepthDataset):
+class ARKitScenesDataset(BaseDepthDataset):
     def __init__(
         self,
         **kwargs,
     ) -> None:
         super().__init__(
-            min_depth=1e-5,
-            max_depth=100,
+            # WARNING: These values have no significance and are just copied from diode, but it does not matter as we do not use depth maps for this (training) dataset.
+            min_depth=0.6,
+            max_depth=350,
             has_filled_depth=False,
             name_mode=DepthFileNameMode.id,
             **kwargs,
