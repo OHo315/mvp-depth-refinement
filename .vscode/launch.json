@@ -47,7 +47,7 @@
         "--base_data_dir", "${workspaceFolder}/data/",
         "--config", "${workspaceFolder}/config/train_marigold_depth.yaml",
         "--output_dir", "${workspaceFolder}/train_output/",
-        "--base_model", "depth_anything_small",
+        "--base_model", "unidepth",
         // "--use_sdpa",
         "--denoiser", "pixel_perfect_depth"
       ]
