@@ -1,5 +1,9 @@
-export WORKSPACE_DIR="$(dirname $0)/../.."
+#export WORKSPACE_DIR="$(dirname $0)/../.."
+export WORKSPACE_DIR=$BASE_DATA_DIR../
 export PYTHONPATH="$WORKSPACE_DIR":$PYTHONPATH
+
+echo $WORKSPACE_DIR
+echo $PYTHONPATH
 
 accelerate launch ppd_sharpdepth/training/train.py \
     --depth_weight 0.4 \
