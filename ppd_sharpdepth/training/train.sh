@@ -14,10 +14,10 @@ accelerate launch ppd_sharpdepth/training/train.py \
     --mixed_precision bf16 \
     --seed 42 \
     --allow_tf32 \
-    --learning_rate 1e-6 \
+    --learning_rate 1e-5 \
     --scale_lr \
     --lr_scheduler cosine \
-    --lr_warmup_steps 200 \
+    --lr_warmup_steps 100 \
     --tracker_project_name ppd_sharpdepth_train \
     --set_grads_to_none \
     --checkpointing_steps 5000 \
