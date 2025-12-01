@@ -1165,8 +1165,12 @@ if "__main__" == __name__:
                                 sharpdepth_kind=sharpdepth_kind,
                             ).to(accelerator.device, dtype=weight_dtype)
                             with torch.no_grad():
+                                images = []
                                 for loader_idx, loader in enumerate(val_loaders):
+                                    images.append([])
                                     for vis_idx, batch in enumerate(loader):
+                                        vis_imgs = {}
+                                        images[loader_idx].append(vis_imgs)
                                         if vis_idx > 4:
                                             continue
                                         rgb = Image.fromarray(
@@ -1220,11 +1224,7 @@ if "__main__" == __name__:
                                                 f"vis_unidepth_error_{loader_idx}_{vis_idx}.jpg",
                                             )
                                         )
-                                        wandb_tracker.log(
-                                            {
-                                                "vis_unidepth_error": wandb.Image(Image.fromarray(error_uni_col)),
-                                            }
-                                        )
+                                        vis_imgs["vis_unidepth_error"] = Image.fromarray(error_uni_col)
 
                                         Image.fromarray(error_col).save(
                                             os.path.join(
@@ -1232,11 +1232,7 @@ if "__main__" == __name__:
                                                 f"vis_pred_depth_error_{loader_idx}_{vis_idx}.jpg",
                                             )
                                         )
-                                        wandb_tracker.log(
-                                            {
-                                                "vis_pred_depth_error": wandb.Image(Image.fromarray(error_col)),
-                                            }
-                                        )
+                                        vis_imgs["vis_pred_depth_error"] = Image.fromarray(error_col)
 
                                         out.depth_colored.save(
                                             os.path.join(
@@ -1244,22 +1240,14 @@ if "__main__" == __name__:
                                                 f"vis_pred_depth_{loader_idx}_{vis_idx}.jpg",
                                             )
                                         )
-                                        wandb_tracker.log(
-                                            {
-                                                "vis_pred_depth": wandb.Image(out.depth_colored),
-                                            }
-                                        )
+                                        vis_imgs["vis_pred_depth"] = out.depth_colored
                                         out.depth_base_colored.save(
                                             os.path.join(
                                                 saved_dir,
                                                 f"vis_unidepth_{loader_idx}_{vis_idx}.jpg",
                                             )
                                         )
-                                        wandb_tracker.log(
-                                            {
-                                                "vis_unidepth": wandb.Image(out.depth_base_colored),
-                                            }
-                                        )
+                                        vis_imgs["vis_unidepth"] = out.depth_base_colored
 
                                         out.pred_mask.save(
                                             os.path.join(
@@ -1267,21 +1255,40 @@ if "__main__" == __name__:
                                                 f"vis_diff_mask_{loader_idx}_{vis_idx}.jpg",
                                             )
                                         )
-                                        wandb_tracker.log(
-                                            {
-                                                "vis_diff_mask": wandb.Image(out.pred_mask),
-                                            }
-                                        )
+                                        vis_imgs["vis_diff_mask"] = out.pred_mask
                                         rgb.save(
                                             os.path.join(
                                                 saved_dir, f"vis_rgb_{loader_idx}_{vis_idx}.jpg"
                                             )
                                         )
-                                        wandb_tracker.log(
-                                            {
-                                                "vis_rgb": wandb.Image(rgb),
-                                            }
-                                        )
+                                        vis_imgs["vis_rgb"] = rgb
+                                    
+                                # put them in a grid and log to wandb and filesystem
+                                keys = set(images[0][0].keys())
+                                for k in keys:
+                                    img_list = []
+                                    for loader_imgs in images:
+                                        for vis_img_dict in loader_imgs:
+                                            if k in vis_img_dict:
+                                                img_list.append(vis_img_dict[k])
+                                    
+                                    if not img_list:
+                                        continue
+                                    
+                                    n = len(img_list)
+                                    cols = int(np.ceil(np.sqrt(n)))
+                                    rows = int(np.ceil(n / cols))
+                                    
+                                    img_w, img_h = img_list[0].size
+                                    
+                                    grid = Image.new("RGB", size=(cols * img_w, rows * img_h))
+                                    for idx, img in enumerate(img_list):
+                                        row = idx // cols
+                                        col = idx % cols
+                                        grid.paste(img, (col * img_w, row * img_h))
+                                    
+                                    grid.save(os.path.join(saved_dir, f"grid_{k}.jpg"))
+                                    wandb_tracker.log({f"grid_{k}": wandb.Image(grid)})
 
                             del pipeline
                             torch.cuda.empty_cache()
