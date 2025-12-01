@@ -16,6 +16,7 @@ from .waymo_dataset import WaymoDataset
 from .sintel_dataset import SintelDataset
 from .unrealstereo_dataset import UnrealStereoDataset
 from .spring_dataset import SpringDataset
+from .diode_dataset import DiodeDataset
 
 dataset_name_class_dict = {
     "kitti": KITTIDataset,
@@ -24,7 +25,8 @@ dataset_name_class_dict = {
     "waymo": WaymoDataset,
     "sintel": SintelDataset,
     "unrealstereo": UnrealStereoDataset,
-    "spring": SpringDataset
+    "spring": SpringDataset,
+    "diode_indoor": DiodeDataset
 }
 
 

@@ -129,7 +129,6 @@ class BaseDepthDataset(Dataset):
 
     def _get_data_item(self, index):
         rgb_rel_path, depth_rel_path, filled_rel_path = self._get_data_path(index=index)
-        print(rgb_rel_path, depth_rel_path, filled_rel_path)
         rasters = {}
         # RGB data
         rasters.update(self._load_rgb_data(rgb_rel_path=rgb_rel_path))
