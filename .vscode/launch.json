@@ -21,7 +21,7 @@
       "cwd": "${workspaceFolder}",
       "env": {
         "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}",
-        "CUDA_VISIBLE_DEVICES": "0"
+        "CUDA_VISIBLE_DEVICES": "1"
       },
       "args": [
         "--sds_loss_weight", "100.0",
@@ -33,12 +33,12 @@
         "--mixed_precision", "bf16",
         "--seed", "42",
         "--allow_tf32",
-        "--learning_rate", "0.5e-5",
+        "--learning_rate", "1e-5",
         // "--scale_lr",
         "--lr_scheduler", "cosine",
         "--lr_warmup_steps", "100",
         "--tracker_project_name", "ppd_sharpdepth_train",
-        "--wandb_name", "good_config_lr_multiplier_0.1",
+        "--wandb_name", "good_config",
         "--set_grads_to_none",
         "--checkpointing_steps", "5000",
         "--validation_steps", "100",
@@ -53,7 +53,7 @@
         "--base_model", "unidepth",
         "--denoiser", "pixel_perfect_depth",
         "--use_conditioning_probability", "0.8",
-        "--dit_patch_encoder_lr_multiplier", "0.1"
+        "--dit_patch_encoder_lr_multiplier", "0.01"
       ]
     },
   ]
