@@ -44,13 +44,13 @@ def download(url):
         print("")
         retval = os.system(cmd)
         assert retval == 0
-        #if args.delete_archive_after_decompress:
-        #    cmd = "rm " + download_file
-        #    print("")
-        #    print(cmd)
-        #    print("")
-        #    retval = os.system(cmd)
-        #    assert retval == 0
+        if args.delete_archive_after_decompress:
+            cmd = "rm " + download_file
+            print("")
+            print(cmd)
+            print("")
+            retval = os.system(cmd)
+            assert retval == 0
 
 
 urls_to_download = [
