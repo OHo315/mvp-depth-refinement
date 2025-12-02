@@ -17,3 +17,6 @@
 [submodule "submodules/ARKitScenes"]
 	path = submodules/ARKitScenes
 	url = git@github.com:anthonyceponis/ARKitScenes.git
+[submodule "submodules/PatchRefiner"]
+	path = submodules/PatchRefiner
+	url = git@github.com:OHo315/PatchRefiner

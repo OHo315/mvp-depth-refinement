@@ -1,3 +1,5 @@
+# NOTE: This file has been ARCHIVED. Do not use this file.
+
 #!/bin/bash
 # source env/bin/activate
 
@@ -12,17 +14,17 @@ helpFunction()
 
 while getopts "m:d:" opt
 do
-   case "$opt" in
-      m) model="$OPTARG" 
-      ;;
-      d) dataset="$OPTARG" 
-      ;;
-      ?) echo "-$OPTARG is not a valid option: ignoring..."; # Ignore any invalid options
-      ;;
-      :) echo "Option -$OPTARG is missing an argument"; # Send the help function if a parameter is missing an argument
-         helpFunction
-      ;;
-   esac
+    case "$opt" in
+        m) model="$OPTARG" 
+        ;;
+        d) dataset="$OPTARG" 
+        ;;
+        ?) echo "-$OPTARG is not a valid option: ignoring..."; # Ignore any invalid options
+        ;;
+        :) echo "Option -$OPTARG is missing an argument"; # Send the help function if a parameter is missing an argument
+            helpFunction
+        ;;
+    esac
 done
 
 # Check which model we are using
@@ -53,6 +55,7 @@ elif [[ "$dataset" == "nyu" || "$dataset" == "n" ]]; then
     dataset="nyu"
 elif [[ "$dataset" == "middlebury" || "$dataset" == "middle" || "$dataset" == "m" ]]; then
     dataset="middlebury"
+elif [[ "$dataset" == "kitti" || ]]
 else
     echo "An invalid dataset was provided: running as if dataset was not specified..."
     dataset="unspecified"
@@ -68,9 +71,9 @@ fi
 cd ../..
 
 if [[ "$model" == "depth-anything" ]]; then
-    ./script/external_models/run-depth-anything.sh -d "$dataset"
+    ./script/external_models/run-depth-anything.sh -d "$dataset" -t
 elif [[ "$model" == "pixel perfect" ]]; then
-    ./script/external_models//run-ppd.sh -d "$dataset"
+    ./script/external_models//run-ppd.sh -d "$dataset" -t
 elif [[ "$model" == "sharpdepth" ]]; then
-    ./script/external_models//run-sharpdepth.sh -d "$dataset"
+    ./script/external_models//run-sharpdepth.sh -d "$dataset" -t
 fi
