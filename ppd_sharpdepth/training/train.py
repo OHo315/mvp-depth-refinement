@@ -13,6 +13,13 @@ from typing import List
 import debugpy
 from ppd_sharpdepth.sharpdepth.util.alignment import align_depth_least_square
 
+import subprocess
+import json
+from rich.pretty import pprint
+import sys
+import shlex
+import tempfile
+
 os.environ["XFORMERS_DISABLED"] = "1"
 
 from diffusers.models.attention_processor import AttnProcessor2_0
@@ -803,6 +810,46 @@ if "__main__" == __name__:
         tracker_config = dict(vars(args))
         accelerator.init_trackers(args.tracker_project_name, config=tracker_config, init_kwargs=init_kwargs)
     # ---------------------------------------------------------------------
+
+    # -------------------------------------------------
+    # for reproducibility, log `git diff` + the current commit hash, and throw if it's too big
+
+    if accelerator.is_main_process and args.report_to == "wandb":
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()
+        diff = subprocess.check_output(["git", "diff", commit]).decode("utf-8")
+
+        if len(diff) > 10000: raise ValueError("Git diff is too large, please commit some of your work before training")
+
+        print(f"Commit: {commit}")
+        print("<diff>")
+        print(diff)
+        print("</diff>")
+
+        # upload the diff as an artefact
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(diff.encode("utf-8"))
+            f.flush()
+
+            wandb_run = accelerator.get_tracker("wandb",unwrap=True)
+
+            artifact = wandb.Artifact("git-diff", type="diff")
+            artifact.add_file(local_path=f.name, name="git-diff.diff")
+            wandb_run.log_artifact(artifact)
+            print("Uploaded git diff as an artifact")
+
+        print("Json stringified diff:",json.dumps(diff))
+
+        print("Args:")
+        pprint(args,expand_all=True)
+
+        print("Command line args:")
+        print(" ".join([shlex.quote(arg) for arg in sys.argv]))
+
+        # Print nvidia-smi
+        nvidia_smi_output = subprocess.check_output(["nvidia-smi"]).decode("utf-8")
+        print("nvidia-smi:")
+        print(nvidia_smi_output)
+    # -------------------------------------------------
 
     # -------------------- Trainer --------------------
     total_batch_size = (

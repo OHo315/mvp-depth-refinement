@@ -16,3 +16,4 @@ timm
 ema-pytorch
 debugpy
 pyarrow
+rich
