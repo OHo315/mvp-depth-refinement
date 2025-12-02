@@ -18,3 +18,13 @@ WAYMO_DATADIR=$BASE_DATA_DIR/waymo_preprocess
 mkdir -p $WAYMO_TXT_DIRPATH
 find $WAYMO_DATADIR -type f -name "*png" > $WAYMO_TXT_FILEPATH
 sed -i "s|$WAYMO_DATADIR/||g" $WAYMO_TXT_FILEPATH
+
+HYPERSIM_TXT_DIRPATH="$BASE_DATA_DIR/../data_split/hypersim_depth"
+HYPERSIM_TXT_FILEPATH="$HYPERSIM_TXT_DIRPATH/hypersim_train_filename_list.txt"
+WAYMO_DATADIR=$BASE_DATA_DIR/waymo_preprocess
+mkdir -p $WAYMO_TXT_DIRPATH
+find $HYPERSIM_TXT_DIRPATH -type f -name "*png" > $HYPERSIM_TXT_FILEPATH
+sed -i "s|$HYPERSIM_TXT_DIRPATH/||g" $HYPERSIM_TXT_FILEPATH
+
+
+

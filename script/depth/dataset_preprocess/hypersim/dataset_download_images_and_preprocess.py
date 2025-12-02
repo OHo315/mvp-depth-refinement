@@ -527,29 +527,29 @@ for url in urls_to_download:
     download(url)
     filename = url.split("/")[-1][:-4]
     # Unzip
-    subprocess.run(
-        ["unzip", "-o", f"{BASE_DATA_DIR}/hypersim/{filename}.zip", "-d", filename]
-    )
+    #subprocess.run(
+    #    ["unzip", "-o", f"{BASE_DATA_DIR}/hypersim/{filename}.zip", "-d", filename]
+    #)
     # Create filtered csv
-    subprocess.run(
-        [
-            "python3",
-            "script/depth/dataset_preprocess/hypersim/filter_hypersim_split.py",
-            "--input_csv",
-            "data_split/hypersim_depth/metadata_images_split_scene_v1.csv",
-            "--output_csv",
-            "data_split/hypersim_depth/metadata_images_split_scene_v1_small.csv",
-            "--scenes",
-            filename,
-        ]
-    )
+    #subprocess.run(
+    #    [
+    #        "python3",
+    #        "script/depth/dataset_preprocess/hypersim/filter_hypersim_split.py",
+    #        "--input_csv",
+    #        "data_split/hypersim_depth/metadata_images_split_scene_v1.csv",
+    #        "--output_csv",
+    #        "data_split/hypersim_depth/metadata_images_split_scene_v1_small.csv",
+    #        "--scenes",
+    #        filename,
+    #    ]
+    #)
     # Preprocess
     subprocess.run(
         [
             "python3",
             "script/depth/dataset_preprocess/hypersim/preprocess_hypersim.py",
             "--split_csv",
-            "data_split/hypersim_depth/metadata_images_split_scene_v1_small.csv",
+            "data_split/hypersim_depth/metadata_images_split_scene_v1.csv",
             "--dataset_dir",
             f"{BASE_DATA_DIR}/hypersim",
             "--output_dir",
