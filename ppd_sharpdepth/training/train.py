@@ -895,6 +895,7 @@ if "__main__" == __name__:
         student_denoiser.train()
         for step, batch in enumerate(train_dataloader):
             with accelerator.accumulate(student_denoiser):
+                og_batch = batch
                 #desired_batch_keys = {"rgb_int", "depth_raw_linear", "valid_mask_raw"}
                 desired_batch_keys = {"rgb_int"}
                 assert set(batch.keys()) >= desired_batch_keys, f"Invalid batch keys: {set(batch.keys())}. expected it to contain at least these keys: {desired_batch_keys}"
@@ -1159,7 +1160,7 @@ if "__main__" == __name__:
 
                             # TODO figure out if the sign should be reversed here
                             score_vector = (pred_noise - noise)
-                        
+
                     sds_loss = 0.5 * F.mse_loss(student_pred_depth_latent, (student_pred_depth_latent - score_vector).detach(), reduction="mean")
 
                     depth_loss = l1_loss(
@@ -1411,7 +1412,8 @@ if "__main__" == __name__:
                                     
                                     grid.save(os.path.join(saved_dir, f"grid_{k}.jpg"))
                                     wandb_log_obj[f"grid_{k}"] = wandb.Image(grid)
-                                wandb_tracker.log(wandb_log_obj)
+                                if args.report_to == "wandb":
+                                    wandb_tracker.log(wandb_log_obj)
 
                             del pipeline
                             torch.cuda.empty_cache()

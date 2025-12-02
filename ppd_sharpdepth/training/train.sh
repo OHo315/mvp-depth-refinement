@@ -5,14 +5,14 @@ export PYTHONPATH="$WORKSPACE_DIR":$PYTHONPATH
 echo $WORKSPACE_DIR
 echo $PYTHONPATH
 
+    # --report_to wandb \
 
 accelerate launch --num_processes 2 --gpu-ids 0,1 ppd_sharpdepth/training/train.py \
-    --sds_loss_weight 10.0 \
+    --sds_loss_weight 100.0 \
     --depth_weight 0.4 \
     --base_ckpt_dir andrew-healey/sharpdepth \
     --student_ckpt_dir andrew-healey/sharpdepth \
     --add_datetime_prefix \
-    --report_to wandb \
     --mixed_precision bf16 \
     --seed 42 \
     --allow_tf32 \
