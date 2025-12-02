@@ -14,7 +14,7 @@ class HypersimDataset(BaseDepthDataset):
         **kwargs,
     ) -> None:
         super().__init__(
-            # NOTE: Copied from marigold. Seems kind of weird that the same vals are used for indoor and outdoor?
+            # NOTE: Copied from marigold. 
             min_depth=1e-5,
             max_depth=65.0,
             has_filled_depth=False,
@@ -43,6 +43,25 @@ class HypersimDataset(BaseDepthDataset):
         rasters = {}
         # RGB data
         rasters.update(self._load_rgb_data(rgb_rel_path=rgb_rel_path))
+
+        scene = rgb_rel_path.split("/")[0]
+        print(scene.index)
+        print(self.intrinsics_df.head())
+        scene_intrisincs = self.intrinsics_df.loc[scene]
+        fx, fy, cx, cy = (
+            scene_intrisincs["M_proj_01"],
+            scene_intrisincs["M_proj_11"],
+            scene_intrisincs["M_proj_02"],
+            scene_intrisincs["M_proj_12"],
+        )
+        intrinsics = torch.tensor([[fx, 0, cx], [0, fy, cy], [0, 0, 1]]).float()
+        other = {
+            "index": index,
+            "rgb_relative_path": rgb_rel_path,
+            "disp_name": self.disp_name,
+            "intrinsics": intrinsics,
+        }
+
         # parts = rgb_rel_path.split("/")
         # cam_p = parts[-1][-5]
         # intrinsics_path = os.path.join(self.dataset_dir, parts[0], "intrinsics", cam_p + '.txt')
