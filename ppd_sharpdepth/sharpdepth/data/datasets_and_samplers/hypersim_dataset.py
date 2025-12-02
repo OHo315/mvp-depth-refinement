@@ -3,10 +3,17 @@
 
 import torch
 
-from ppd_sharpdepth.sharpdepth.data.datasets_and_samplers.base_depth_dataset import BaseDepthDataset, DepthFileNameMode, get_pred_name, DatasetMode
-import numpy as np 
+from ppd_sharpdepth.sharpdepth.data.datasets_and_samplers.base_depth_dataset import (
+    BaseDepthDataset,
+    DepthFileNameMode,
+    get_pred_name,
+    DatasetMode,
+)
+import numpy as np
 import os
 from PIL import Image
+import pandas as pd
+
 
 class HypersimDataset(BaseDepthDataset):
     def __init__(
@@ -21,6 +28,11 @@ class HypersimDataset(BaseDepthDataset):
             name_mode=DepthFileNameMode.rgb_i_d,
             **kwargs,
         )
+
+        BASE_DATA_DIR = os.environ["BASE_DATA_DIR"]
+        intrinsics_filepath = f"{BASE_DATA_DIR}/../data_split/hypersim_normals/metadata_camera_parameters.csv"
+
+        self.intrinsics_df = pd.read_csv(intrinsics_filepath).set_index("scene_name")
 
     def _load_rgb_data(self, rgb_rel_path):
         # Read RGB data
@@ -37,24 +49,43 @@ class HypersimDataset(BaseDepthDataset):
         rgb_data = super()._load_rgb_data(rgb_rel_path)
         return rgb_data
 
-
     def _get_data_item(self, index):
         rgb_rel_path, depth_rel_path, filled_rel_path = self._get_data_path(index=index)
 
         rasters = {}
         # RGB data
         rasters.update(self._load_rgb_data(rgb_rel_path=rgb_rel_path))
-        #parts = rgb_rel_path.split('/')
-        #cam_p = parts[-1][-5]
-        #intrinsics_path = os.path.join(self.dataset_dir, parts[0], "intrinsics", cam_p + '.txt')
-        #intrinsic = np.loadtxt(intrinsics_path)
-        #fx, fy, cx, cy = intrinsic[0], intrinsic[1], intrinsic[2], intrinsic[3]
 
-        #intrinsics = torch.tensor([[fx, 0, cx],
+        scene = rgb_rel_path.split("/")[0]
+        scene_intrisincs = self.intrinsics_df[scene]
+        fx, fy, cx, cy = (
+            scene_intrisincs["M_proj_01"],
+            scene_intrisincs["M_proj_11"],
+            scene_intrisincs["M_proj_02"],
+            scene_intrisincs["M_proj_12"],
+        )
+        intrinsics = torch.tensor([[fx, 0, cx], [0, fy, cy], [0, 0, 1]]).float()
+        other = {
+            "index": index,
+            "rgb_relative_path": rgb_rel_path,
+            "disp_name": self.disp_name,
+            "intrinsics": intrinsics,
+        }
+
+        # parts = rgb_rel_path.split("/")
+        # cam_p = parts[-1][-5]
+        # intrinsics_path = os.path.join(self.dataset_dir, parts[0], "intrinsics", cam_p + '.txt')
+        # intrinsic = np.loadtxt(intrinsics_path)
+        # fx, fy, cx, cy = intrinsic[0], intrinsic[1], intrinsic[2], intrinsic[3]
+
+        # intrinsics = torch.tensor([[fx, 0, cx],
         #                            [0, fy, cy],
         #                            [0,0,1]]).float()
-        #other = {"index": index, "rgb_relative_path": rgb_rel_path, 'disp_name': self.disp_name, 'intrinsics': intrinsics}
-        other = {"index": index, "rgb_relative_path": rgb_rel_path, 'disp_name': self.disp_name}
+        # other = {"index": index, "rgb_relative_path": rgb_rel_path, 'disp_name': self.disp_name, 'intrinsics': intrinsics}
+        # other = {
+        #    "index": index,
+        #    "rgb_relative_path": rgb_rel_path,
+        #    "disp_name": self.disp_name,
+        # }
 
         return rasters, other
-
