@@ -4,9 +4,6 @@ import shutil
 from tqdm import tqdm
 import subprocess
 
-# 1970 TRAINING DIRS
-# 39k IMAGES
-
 if __name__ == "__main__":
     BASE_DATA_DIR = os.environ["BASE_DATA_DIR"]
 
@@ -25,7 +22,6 @@ if __name__ == "__main__":
         os.makedirs(chunk_dirpath)
         for folder in folders[i:min(i+chunk_size, len(folders))]:
             shutil.copytree(folder, chunk_dirpath / folder.name)
-        #print(f"tar -czf {chunk_dirpath}.tar.gz {chunk_dirpath}".split(" "))
         subprocess.run(f"tar -czf {chunk_dirpath}.tar.gz -C {arkit_chunked_dirpath} {i}".split(" "))
         shutil.rmtree(chunk_dirpath)
         subprocess.run(f"hf upload bambezius/arkitscenes {chunk_dirpath}.tar.gz --repo-type=dataset".split())
