@@ -20,9 +20,11 @@
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
       "env": {
-        "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}"
+        "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}",
+        "CUDA_VISIBLE_DEVICES": "1"
       },
       "args": [
+        "--sds_loss_weight", "100.0",
         "--depth_weight", "0.4",
         "--base_ckpt_dir", "andrew-healey/sharpdepth",
         "--student_ckpt_dir", "andrew-healey/sharpdepth",
@@ -31,8 +33,8 @@
         "--mixed_precision", "bf16",
         "--seed", "42",
         "--allow_tf32",
-        "--learning_rate", "1e-5",
-        "--scale_lr",
+        "--learning_rate", "0.5e-5",
+        // "--scale_lr",
         "--lr_scheduler", "cosine",
         "--lr_warmup_steps", "100",
         "--tracker_project_name", "ppd_sharpdepth_train",
@@ -41,14 +43,16 @@
         "--validation_steps", "100",
         "--train_batch_size", "1",
         "--gradient_accumulation_steps", "8",
-        "--num_train_epochs", "6",
+        "--num_train_epochs", "1",
         "--use_ema",
+        "--report_to", "wandb",
         "--base_data_dir", "${workspaceFolder}/data/",
         "--config", "${workspaceFolder}/config/train_marigold_depth.yaml",
         "--output_dir", "${workspaceFolder}/train_output/",
         "--base_model", "unidepth",
         "--denoiser", "pixel_perfect_depth",
-        "--use_conditioning_probability", "0.8"
+        "--use_conditioning_probability", "0.8",
+        "--dit_patch_encoder_lr_multiplier", "0.01"
       ]
     },
   ]
