@@ -11,13 +11,13 @@
 #mkdir -p $ARKIT_TXT_DIRPATH
 #find $ARKIT_DATADIR -type f -name "*png" > $ARKIT_TXT_FILEPATH
 #sed -i "s|$ARKIT_DATADIR/||g" $ARKIT_TXT_FILEPATH
-#
-#WAYMO_TXT_DIRPATH="$BASE_DATA_DIR/../data_split/waymo_depth"
-#WAYMO_TXT_FILEPATH="$WAYMO_TXT_DIRPATH/waymo_train_filename_list.txt"
-#WAYMO_DATADIR="$BASE_DATA_DIR/waymo_preprocess"
-#mkdir -p $WAYMO_TXT_DIRPATH
-#find $WAYMO_DATADIR -type f -name "*png" > $WAYMO_TXT_FILEPATH
-#sed -i "s|$WAYMO_DATADIR/||g" $WAYMO_TXT_FILEPATH
+
+WAYMO_TXT_DIRPATH="$BASE_DATA_DIR/../data_split/waymo_depth"
+WAYMO_TXT_FILEPATH="$WAYMO_TXT_DIRPATH/waymo_train_filename_list.txt"
+WAYMO_DATADIR="$BASE_DATA_DIR/waymo_preprocess"
+mkdir -p $WAYMO_TXT_DIRPATH
+find $WAYMO_DATADIR -type f -name "*png" > $WAYMO_TXT_FILEPATH
+sed -i "s|$WAYMO_DATADIR/||g" $WAYMO_TXT_FILEPATH
 
 HYPERSIM_TXT_DIRPATH="$BASE_DATA_DIR/../data_split/hypersim_depth"
 HYPERSIM_TXT_FILEPATH="$HYPERSIM_TXT_DIRPATH/hypersim_train_filename_list.txt"
@@ -32,6 +32,6 @@ sed -i "s|$HYPERSIM_DATADIR/||g" $HYPERSIM_TXT_FILEPATH
 rm $tmp1
 rm $tmp2
 
-
+python script/data_fetch/remove_invalid_rgb_images.py --txt_file $HYPERSIM_TXT_FILEPATH --datadir $HYPERSIM_DATADIR
 
 
