@@ -100,9 +100,26 @@ if "__main__" == __name__:
                 f"scene_{row.camera_name}_geometry_hdf5",
                 f"frame.{row.frame_id:04d}.render_entity_id.hdf5",
             )
-            #assert os.path.exists(os.path.join(dataset_dir, rgb_path))
-            #assert os.path.exists(os.path.join(dataset_dir, dist_path))
-            if not os.path.exists(os.path.join(dataset_dir, rgb_path)) or not os.path.exists(os.path.join(dataset_dir, dist_path)):
+            #camera_ortientations_path = os.path.join(
+            #    row.scene_name,
+            #    "_detail",
+            #    "cam_{row.camera_name}",
+            #    "camera_keyframe_orientations.hdf5"
+            #)
+            #camera_posititions_path = os.path.join(
+            #    row.scene_name,
+            #    "_detail",
+            #    "cam_{row.camera_name}",
+            #    "camera_keyframe_orientations.hdf5"
+            #)
+
+            if not any([
+                os.path.exists(os.path.join(dataset_dir, rgb_path)),
+                os.path.exists(os.path.join(dataset_dir, dist_path)),
+                os.path.exists(os.path.join(dataset_dir, render_entity_id_path)),
+                #os.path.exists(os.path.join(dataset_dir, camera_ortientations_path)),
+                #os.path.exists(os.path.join(dataset_dir, camera_posititions_path)),
+            ]):
                 continue
 
 
@@ -112,6 +129,12 @@ if "__main__" == __name__:
                 dist_from_center = np.array(f["dataset"]).astype(float)
             with h5py.File(os.path.join(dataset_dir, render_entity_id_path), "r") as f:
                 render_entity_id = np.array(f["dataset"]).astype(int)
+            #with h5py.File(os.path.join(dataset_dir, camera_ortientations_path), "r") as f:
+            #    render_entity_id = np.array(f["dataset"]).astype(int)
+            #with h5py.File(os.path.join(dataset_dir, camera_posititions_path), "r") as f:
+            #    render_entity_id = np.array(f["dataset"]).astype(int)
+
+ 
 
             # Tone map
             rgb_color_tm = tone_map(rgb, render_entity_id)
