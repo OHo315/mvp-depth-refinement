@@ -45,8 +45,6 @@ class HypersimDataset(BaseDepthDataset):
         rasters.update(self._load_rgb_data(rgb_rel_path=rgb_rel_path))
 
         scene = rgb_rel_path.split("/")[0]
-        print(scene.index)
-        print(self.intrinsics_df.head())
         scene_intrisincs = self.intrinsics_df.loc[scene]
         fx, fy, cx, cy = (
             scene_intrisincs["M_proj_01"],
