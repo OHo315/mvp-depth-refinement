@@ -21,7 +21,7 @@ if __name__ == "__main__":
     # lines = [line for line in lines if "ai_003_001/rgb_cam_00_fr0085.png" in line]
     
     new_lines = []
-    for line in tqdm(lines):
+    for line in tqdm(lines, desc="filtering invalid images"):
         rgb_path, depth_path = line.split()
         rgb = cv2.imread(os.path.join(datadir, rgb_path))
         if np.all(rgb == 0):
