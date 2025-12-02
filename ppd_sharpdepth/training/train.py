@@ -381,7 +381,9 @@ if "__main__" == __name__:
     parser.add_argument("--use_conditioning_probability", type=float, default=0.8, help="Probability of using conditioning in the student denoiser")
     parser.add_argument("--wandb_name", type=str, default="", help="Name of the wandb run")
     parser.add_argument("--debug", action="store_true", help="Debug mode")
-    parser.add_argument("--compute_initial_depth_loss_probability", type=float, default=0.1, help="Probability of computing the initial depth loss")
+    parser.add_argument("--compute_initial_depth_loss_probability", type=float, default=1.0, help="Probability of computing the initial depth loss")
+    parser.add_argument("--dit_patch_encoder_lr_multiplier", type=float, default=0.01, help="Multiplier for the learning rate of the DiT patch encoder")
+    parser.add_argument("--sds_loss_weight", type=float, default=1.0, help="Weight for the SDS loss")
 
     args = parser.parse_args()
 
@@ -695,11 +697,23 @@ if "__main__" == __name__:
     else:
         optimizer_class = torch.optim.AdamW
 
-    params_to_optimize = list(filter(lambda p: p.requires_grad, student_denoiser.parameters()))
+    # let's make a special group for the DiT patch encoder
+    params_to_optimize_dit_patch_encoder = [np[1] for np in filter(lambda np: np[1].requires_grad and np[0].startswith("dit.x_embedder.proj"), student_denoiser.named_parameters())]
+    other_params_to_optimize = [np[1] for np in filter(lambda np: np[1].requires_grad and not np[0].startswith("dit.x_embedder.proj"), student_denoiser.named_parameters())]
+
+    param_groups = [
+        {
+            "params": params_to_optimize_dit_patch_encoder,
+            "lr": args.learning_rate * args.dit_patch_encoder_lr_multiplier,
+        },
+        {
+            "params": other_params_to_optimize,
+            "lr": args.learning_rate,
+        }
+    ]
 
     optimizer = optimizer_class(
-        params_to_optimize,
-        lr=args.learning_rate,
+        param_groups,
         betas=(args.adam_beta1, args.adam_beta2),
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon,
@@ -1179,7 +1193,7 @@ if "__main__" == __name__:
 
                 # ------------------------------------------------------------------
                 # Optimization
-                loss = sds_loss + depth_loss * args.depth_weight
+                loss = sds_loss * args.sds_loss_weight + depth_loss * args.depth_weight
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
                     if args.use_ema:
