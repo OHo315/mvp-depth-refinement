@@ -7,6 +7,7 @@ from ppd_sharpdepth.sharpdepth.data.datasets_and_samplers.base_depth_dataset imp
 import numpy as np
 import os
 from PIL import Image
+import pandas as pd
 
 class HypersimDataset(BaseDepthDataset):
     def __init__(
@@ -21,6 +22,12 @@ class HypersimDataset(BaseDepthDataset):
             name_mode=DepthFileNameMode.rgb_i_d,
             **kwargs,
         )
+
+        BASE_DATA_DIR = os.environ["BASE_DATA_DIR"]
+        intrinsics_filepath = f"{BASE_DATA_DIR}/../data_split/hypersim_normals/metadata_camera_parameters.csv"
+
+        self.intrinsics_df = pd.read_csv(intrinsics_filepath).set_index("scene_name")
+
 
     def _load_rgb_data(self, rgb_rel_path):
         # Read RGB data
