@@ -1029,10 +1029,11 @@ if "__main__" == __name__:
                     disp_base = disp_base_11hw = base_depth_estimator_fn(rgb, rgb)
                     assert disp_base_11hw.shape[2:] == rgb.shape[2:], f"Base depth map doesn't match its input image resolution! disp_base_11hw.shape[2:] = {disp_base_11hw.shape[2:]}, rgb_float_1chw.shape[2:] = {rgb.shape[2:]}"
 
-                normalize_obj = depth_normalizer(disp_base)
-                norm_base_depth = normalize_obj["norm_depth"].to(dtype=weight_dtype)
-
                 if sharpdepth_kind == SharpDepthKind.LOTUS:
+
+                    normalize_obj = depth_normalizer(disp_base)
+                    norm_base_depth = normalize_obj["norm_depth"].to(dtype=weight_dtype)
+
 
                     # 1. Encode depth (totally lotus-specific)
                     unidepth_latent = encode_depth(vae, norm_base_depth)
@@ -1174,6 +1175,10 @@ if "__main__" == __name__:
 
                 
                 elif sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
+
+                    # in this case, norm_base_depth is in log space!
+                    normalize_obj = depth_normalizer(torch.log(disp_base + 1))
+                    norm_base_depth = normalize_obj["norm_depth"].to(dtype=weight_dtype)
 
                     norm_base_depth = norm_base_depth * 0.5 + 0.5
 
