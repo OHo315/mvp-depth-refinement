@@ -2,7 +2,7 @@ __pycache__
 /env
 *.ipynb
 /data
-/data2
+/preds
 /output
 /viz
 /train_output
