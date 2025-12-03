@@ -277,7 +277,7 @@ class SharpDepthPipeline(DiffusionPipeline):
         elif self.sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH: 
             depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, PixelPerfectDepthPreProcessor)
 
-            normalize_obj = self.depth_normalizer(torch.log(depth_base_11hw + 1))
+            normalize_obj = self.depth_normalizer(depth_base_11hw)
             norm_base_depth = normalize_obj["norm_depth"].to(dtype=self.unet.dtype)
             norm_base_depth = norm_base_depth * 0.5 + 0.5
 
@@ -310,19 +310,6 @@ class SharpDepthPipeline(DiffusionPipeline):
                     pred = self.unet.dit(x=student_input, semantics=semantics, timestep=timestep)
                     latent = self.unet.sampler.step(pred=pred, x_t=latent, t=timestep)
                 student_pred_depth = latent + 0.5
-            
-            # student_pred_depth is in log space
-            # so let's use least-squares to align as closely as possible with log-space depth_base
-            # and then convert it to metric space!
-            depth_base_11hw_log_space = torch.log(depth_base_11hw + 1)
-            student_pred_depth_aligned, _, _ = align_depth_least_square(
-                gt_arr=depth_base_11hw_log_space.detach().float().cpu().numpy(),
-                pred_arr=student_pred_depth.detach().float().cpu().numpy(),
-                valid_mask_arr=torch.ones_like(student_pred_depth).bool().cpu().numpy(),
-                return_scale_shift=True,
-                max_resolution=None,
-            )
-            student_pred_depth = torch.exp(student_pred_depth_aligned) - 1
 
         else:
             raise NotImplementedError(f"SharpDepthKind {self.sharpdepth_kind} not implemented yet")
