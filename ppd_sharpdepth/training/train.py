@@ -947,7 +947,7 @@ if "__main__" == __name__:
     # and when it is, it might appear more times in one batch than another
 
     conditioning_kinds = ["no_cond","cond", "all"]
-    loss_keys = ["total","sds","depth","initial_depth"]
+    loss_keys = ["total","sds","depth","initial_depth","depth_mse","initial_depth_mse"]
 
     # initialize EMA buffers at 0
     loss_exponential_moving_averages = { conditioning_kind: { loss_key: 0.0 for loss_key in loss_keys } for conditioning_kind in conditioning_kinds }
@@ -1031,6 +1031,9 @@ if "__main__" == __name__:
 
                     batch = batch_resized
                     rgb = rgb_float_1chw_resized
+
+                    padding = (0,0)
+
                 else:
                     raise NotImplementedError(f"Image resizing not implemented for denoiser={sharpdepth_kind}")
                 
@@ -1178,6 +1181,7 @@ if "__main__" == __name__:
                     depth_loss = l1_loss(
                         pred_depth_unpadded * 0.5 + 0.5, norm_base_depth_unpadded * 0.5 + 0.5, l1_error_unpadded
                     )
+                    depth_mse = F.mse_loss(pred_depth_unpadded * 0.5 + 0.5, norm_base_depth_unpadded * 0.5 + 0.5, reduction="mean")
 
                     # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
 
@@ -1197,6 +1201,7 @@ if "__main__" == __name__:
                             initial_depth_loss = l1_loss(
                                 frozen_pred_depth_aligned, norm_base_depth_unpadded * 0.5 + 0.5, l1_error_unpadded
                             )
+                            initial_depth_mse = F.mse_loss(frozen_pred_depth_aligned, norm_base_depth_unpadded * 0.5 + 0.5, reduction="mean")
 
 
                 
@@ -1266,6 +1271,7 @@ if "__main__" == __name__:
                     depth_loss = l1_loss(
                         student_pred_depth_latent + 0.5, x0 + 0.5, l1_error
                     )
+                    depth_mse = F.mse_loss(student_pred_depth_latent + 0.5, x0 + 0.5, reduction="mean")
 
                     # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
 
@@ -1285,6 +1291,7 @@ if "__main__" == __name__:
                             initial_depth_loss = l1_loss(
                                 frozen_pred_depth_aligned, x0 + 0.5, l1_error
                             )
+                            initial_depth_mse = F.mse_loss(frozen_pred_depth_aligned, x0 + 0.5, reduction="mean")
 
                 else:
                     raise NotImplementedError(f"Image resizing not implemented for denoiser={sharpdepth_kind}")
@@ -1535,13 +1542,17 @@ if "__main__" == __name__:
                         "total": (loss.detach(), torch.tensor(1,device=loss.device)),
                         "sds": (sds_loss.detach(), torch.tensor(1,device=sds_loss.device)),
                         "depth": (depth_loss.detach(), torch.tensor(1,device=depth_loss.device)),
+                        "depth_mse": (depth_mse.detach(), torch.tensor(1,device=depth_mse.device)),
                         "initial_depth": (initial_depth_loss.detach() if initial_depth_loss is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_loss.device) if initial_depth_loss is not None else torch.tensor(0,device=device)),
+                        "initial_depth_mse": (initial_depth_mse.detach() if initial_depth_mse is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_mse.device) if initial_depth_mse is not None else torch.tensor(0,device=device)),
                     },
                     "all": {
                         "total": (loss.detach(), torch.tensor(1,device=loss.device)),
                         "sds": (sds_loss.detach(), torch.tensor(1,device=sds_loss.device)),
                         "depth": (depth_loss.detach(), torch.tensor(1,device=depth_loss.device)),
+                        "depth_mse": (depth_mse.detach(), torch.tensor(1,device=depth_mse.device)),
                         "initial_depth": (initial_depth_loss.detach() if initial_depth_loss is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_loss.device) if initial_depth_loss is not None else torch.tensor(0,device=device)),
+                        "initial_depth_mse": (initial_depth_mse.detach() if initial_depth_mse is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_mse.device) if initial_depth_mse is not None else torch.tensor(0,device=device)),
                     },
                     **{empty_conditioning_kind:{loss_key:(torch.tensor(0,device=device,dtype=loss.dtype),torch.tensor(0,device=device,dtype=loss.dtype)) for loss_key in loss_keys} for empty_conditioning_kind in conditioning_kinds if empty_conditioning_kind not in [conditioning_kind, "all"]}
                 }
