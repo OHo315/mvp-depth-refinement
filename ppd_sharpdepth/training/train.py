@@ -433,7 +433,7 @@ if "__main__" == __name__:
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
         log_with=args.report_to,
-        project_config=accelerator_project_config,
+        project_config=accelerator_project_config
     )
     logger.info(accelerator.state, main_process_only=False)
     if accelerator.is_local_main_process:
@@ -644,6 +644,11 @@ if "__main__" == __name__:
     student_denoiser.requires_grad_(True)
     if sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
         student_denoiser.semantics_encoder.requires_grad_(False)
+    
+    def disable_dropout(model):
+        for module in model.modules():
+            if isinstance(module, nn.Dropout):
+                module.p = 0
 
     # ---------------------------------------------------------------------
 
@@ -756,10 +761,10 @@ if "__main__" == __name__:
     lr_scheduler = get_scheduler(
         args.lr_scheduler,
         optimizer=optimizer,
-        num_warmup_steps=args.lr_warmup_steps * accelerator.num_processes,
-        num_training_steps=args.max_train_steps * accelerator.num_processes,
+        num_warmup_steps=args.lr_warmup_steps,
+        num_training_steps=args.max_train_steps,
         num_cycles=args.lr_num_cycles,
-        power=args.lr_power,
+        power=args.lr_power
     )
     # ---------------------------------------------------------------------
 
@@ -767,6 +772,7 @@ if "__main__" == __name__:
     student_denoiser, frozen_denoiser, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         student_denoiser, frozen_denoiser, optimizer, train_dataloader, lr_scheduler
     )
+    lr_scheduler.split_batches = True
 
     unwrapped_frozen_denoiser = unwrap_model(frozen_denoiser)
     unwrapped_student_denoiser = unwrap_model(student_denoiser)
@@ -788,7 +794,7 @@ if "__main__" == __name__:
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     student_denoiser.to(accelerator.device, dtype=weight_dtype)
 
-    base_depth_estimator_fn = get_base_depth_estimator_fn(args.base_model, accelerator.device, torch.float32)
+    base_depth_estimator_fn = get_base_depth_estimator_fn(args.base_model, accelerator.device, torch.bfloat16)
 
 
     if args.use_ema:
@@ -1284,9 +1290,10 @@ if "__main__" == __name__:
                     params_to_clip = student_denoiser.parameters()
                     accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
 
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad(set_to_none=args.set_grads_to_none)
+                if accelerator.sync_gradients:
+                    optimizer.step()
+                    lr_scheduler.step()
+                    optimizer.zero_grad(set_to_none=args.set_grads_to_none)
                 # ------------------------------------------------------------------
 
                 # Checks if the accelerator has performed an optimization step behind the scenes
