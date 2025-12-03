@@ -97,7 +97,7 @@ if "__main__" == __name__:
 
     # Determine img paths depending on mode.
     if not input_txt:
-        imgs = listsorted(os.listdir(input_dir))
+        imgs = list(sorted(os.listdir(input_dir)))
     else:
         with open(input_txt, "r") as f:
             # EXPECTED FORMAT PER LINE: '{rgb_path} {depth_label_path}'
