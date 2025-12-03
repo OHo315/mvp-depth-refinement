@@ -54,12 +54,12 @@ if __name__ == "__main__":
     elif sys.argv[1] == "push_trained_checkpoint":
         branch_name = sys.argv[2]
         local_folder_name = sys.argv[3]
-        print(f"Pushing trained checkpoint in local folder {local_folder_name} to remote ppd_student/ subfolder in a new branch of andrew-healey/sharpdepth")
+        print(f"Pushing trained checkpoint in local folder {local_folder_name} to remote ppd_student/ subfolder in a new branch {branch_name} of andrew-healey/sharpdepth")
         input("Press Enter to continue: ")
 
         # branch = create_branch(repo_id="andrew-healey/sharpdepth", branch=branch_name,revision="main")
         # rm -rf ppd_student on the branch
-        delete_folder(repo_id="andrew-healey/sharpdepth", path_in_repo="ppd_student", revision=branch_name)
+        # delete_folder(repo_id="andrew-healey/sharpdepth", path_in_repo="ppd_student", revision=branch_name)
         upload_folder(repo_id="andrew-healey/sharpdepth", folder_path=local_folder_name, path_in_repo="ppd_student", revision=branch_name)
     else:
         raise ValueError(f"Invalid command: {sys.argv[1]}")
