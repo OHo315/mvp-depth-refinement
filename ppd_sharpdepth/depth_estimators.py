@@ -103,6 +103,11 @@ def get_depth_estimator_fn(
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor] = MarigoldPreProcessor):
                 out = pipeline(rgb_int_1chw)
 
+                #out.depth_base_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}.jpg"))
+                #out.depth_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}_sharpdepth.png"))
+
+
+
                 h, w = out.depth_np.shape
                 ret_11hw = torch.from_numpy(out.depth_np.reshape(1, 1, h, w))
                 
