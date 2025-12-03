@@ -26,8 +26,9 @@ from typing import Callable
 def get_base_depth_estimator_fn(base_model: str, device: torch.device, dtype: torch.dtype) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
     if base_model == "unidepth":
         unidepth = UniDepthV1.from_pretrained("lpiccinelli/unidepth-v1-vitl14")
-        unidepth = unidepth.to(device, dtype=dtype)
+        unidepth = unidepth.to(device, dtype=dtype).eval()
         unidepth.requires_grad_(False)
+        @torch.autocast(device_type=device.type, dtype=dtype)
         def base_depth_estimator_fn(marigold_preprocessed_image_1chw, _raw_image_1chw):
             ret_11hw = unidepth.infer((marigold_preprocessed_image_1chw*255).squeeze().int())['depth']
             return ret_11hw
@@ -62,6 +63,7 @@ def get_base_depth_estimator_fn(base_model: str, device: torch.device, dtype: to
             PrepareForNet(),
         ])
 
+        @torch.autocast(device_type=device.type, dtype=dtype)
         def base_depth_estimator_fn(marigold_preprocessed_image_1chw, raw_image_1chw):
 
             image_1hwc = transform({'image': (raw_image_1chw/255.).permute(0, 2, 3, 1).squeeze(0).float().cpu().numpy()})['image'][None]
@@ -89,6 +91,7 @@ def get_base_depth_estimator_fn(base_model: str, device: torch.device, dtype: to
         model = model.to(device).eval()
         model.requires_grad_(False)
 
+        @torch.autocast(device_type=device.type, dtype=dtype)
         def base_depth_estimator_fn(marigold_preprocessed_image_1chw, raw_image_1chw):
             H, W = marigold_preprocessed_image_1chw.squeeze(0).shape[1:3]
             raw_image_hwc = raw_image_1chw.squeeze(0).permute(1, 2, 0).float().cpu().numpy()
