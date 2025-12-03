@@ -15,7 +15,7 @@ mkdir -p $BASE_DATA_DIR
 
 echo "Installing top-level dependencies..."
 
-pip install -qr requirements++.txt -r requirements+.txt -r requirements.txt
+pip install -qr requirements+++.txt -r requirements++.txt -r requirements+.txt -r requirements.txt
 
 echo "Done installing top-level dependencies"
 
