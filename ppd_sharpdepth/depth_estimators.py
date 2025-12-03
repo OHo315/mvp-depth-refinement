@@ -37,14 +37,14 @@ ModelArchitecture = Enum(
         lambda model_name: (model_name, model_name),
         [
             "sharpdepth_lotus_unidepth",
-            "sharpdepth_lotus_depthanything",
+            "sharpdepth_lotus_depthanythingsmall",
             "sharpdepth_lotus_pixelperfectdepth",
             "sharpdepth_ppd_unidepth",
             "depthanythingsmall",
             "depthanythinglarge",
             "pixelperfectdepth",
             "unidepth",
-            "lotus",
+            #"lotus",
         ]
     )
 )
@@ -57,13 +57,36 @@ def get_depth_estimator_fn(
         checkpoint_filepath: Path, 
 ) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
     match model_architecture:
-        case ModelArchitecture.sharpdepth_lotus_unidepth:
-            UNIDEPTH_CHECKPOINT_DIR="lpiccinelli/unidepth-v1-vitl14"
-            base_depth_estimator_fn = get_depth_estimator_fn(
-                ModelArchitecture.unidepth, 
-                device, dtype, 
-                UNIDEPTH_CHECKPOINT_DIR
-            )
+        case (
+            ModelArchitecture.sharpdepth_lotus_unidepth 
+            | ModelArchitecture.sharpdepth_lotus_depthanythingsmall
+            | ModelArchitecture.sharpdepth_lotus_pixelperfectdepth
+        ):
+            match model_architecture:
+                case ModelArchitecture.sharpdepth_lotus_unidepth:
+                    BASE_MODEL_CHECKPOINT_DIR = "lpiccinelli/unidepth-v1-vitl14"
+                    base_depth_estimator_fn = get_depth_estimator_fn(
+                        ModelArchitecture.unidepth, 
+                        device, 
+                        dtype, 
+                        BASE_MODEL_CHECKPOINT_DIR
+                    )
+                case ModelArchitecture.sharpdepth_lotus_depthanythingsmall:
+                    BASE_MODEL_CHECKPOINT_DIR = "LiheYoung/depth_anything_vits14"
+                    base_depth_estimator_fn = get_depth_estimator_fn(
+                        ModelArchitecture.depthanythingsmall, 
+                        device, 
+                        dtype, 
+                        BASE_MODEL_CHECKPOINT_DIR
+                    )
+                case ModelArchitecture.sharpdepth_lotus_pixelperfectdepth:
+                    BASE_MODEL_CHECKPOINT_DIR = "andrew-healey/sharpdepth"
+                    base_depth_estimator_fn = get_depth_estimator_fn(
+                        ModelArchitecture.pixelperfectdepth, 
+                        device, 
+                        dtype, 
+                        BASE_MODEL_CHECKPOINT_DIR
+                    )
 
             pipeline = SharpDepthPipeline.from_pretrained(
                 checkpoint_filepath, 
@@ -85,13 +108,35 @@ def get_depth_estimator_fn(
                 
                 return ret_11hw
 
-                
-        case ModelArchitecture.sharpdepth_lotus_depthanything:
-            pass
-        case ModelArchitecture.sharpdepth_lotus_pixelperfectdepth:
-            pass
         case ModelArchitecture.sharpdepth_ppd_unidepth:
-            pass
+
+            DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR="LiheYoung/depth_anything_vits14"
+            base_depth_estimator_fn = get_depth_estimator_fn(
+                ModelArchitecture.depthanythingsmall, 
+                device, dtype, 
+                DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR
+            )
+
+            pipeline = SharpDepthPipeline.from_pretrained(
+                checkpoint_filepath, 
+                sharpdepth_kind=SharpDepthKind.PPD, 
+                base_depth_estimator_fn=base_depth_estimator_fn,
+                default_processing_resolution=768, 
+                default_denoising_steps=1
+            )
+            assert pipeline.default_processing_resolution == 768, f"default_processing_resolution = {pipeline.default_processing_resolution}, expected 768"
+            assert pipeline.default_denoising_steps == 1, f"default_denoising_steps = {pipeline.default_denoising_steps}, expected 1"
+
+            pipeline = pipeline.to(device, dtype=dtype)
+
+            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor] = MarigoldPreProcessor):
+                out = pipeline(rgb_int_1chw)
+
+                h, w = out.depth_np.shape
+                ret_11hw = torch.from_numpy(out.depth_np.reshape(1, 1, h, w))
+                
+                return ret_11hw
+
         case ModelArchitecture.unidepth:
 
             unidepth = UniDepthV1.from_pretrained(checkpoint_filepath)
