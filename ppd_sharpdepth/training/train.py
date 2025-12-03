@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List
 import debugpy
 from diffusers.pipelines.marigold.marigold_image_processing import MarigoldImageProcessor
+from ppd_sharpdepth.depth_estimators import ModelArchitecture, get_depth_estimator_fn
 from ppd_sharpdepth.preprocessors import MarigoldPreProcessor
 from ppd_sharpdepth.sharpdepth.util.alignment import align_depth_least_square
 
@@ -798,7 +799,23 @@ if "__main__" == __name__:
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     student_denoiser.to(accelerator.device, dtype=weight_dtype)
 
-    base_depth_estimator_fn = get_base_depth_estimator_fn(args.base_model, accelerator.device, torch.bfloat16)
+    model_architecture = ModelArchitecture(args.base_model)
+
+    def get_checkpoint_from_model_architecture(model_architecture: ModelArchitecture) -> str:
+        match model_architecture:
+            case ModelArchitecture.unidepth:
+                return "lpiccinelli/unidepth-v1-vitl14"
+            case ModelArchitecture.depthanythingsmall:
+                return "LiheYoung/depth_anything_vits14"
+            case ModelArchitecture.depthanythinglarge:
+                return "LiheYoung/depth_anything_vitl14"
+            case ModelArchitecture.pixelperfectdepth:
+                return "andrew-healey/sharpdepth"
+            case _:
+                raise ValueError(f"Invalid model architecture: {model_architecture}")
+
+    base_model_checkpoint = get_checkpoint_from_model_architecture(model_architecture)
+    base_depth_estimator_fn = get_depth_estimator_fn(model_architecture, accelerator.device, torch.bfloat16, base_model_checkpoint)
 
 
     if args.use_ema:
@@ -1410,8 +1427,9 @@ if "__main__" == __name__:
                                             .numpy()
                                             .astype(np.uint8)
                                         )
+                                        rgb_int_1chw = torch.from_numpy(np.array(rgb)).to(torch.int32).permute(2, 0, 1).unsqueeze(0)
                                         out = pipeline(
-                                            rgb, base_depth_estimator_fn, processing_res=768, denoising_steps=1
+                                            rgb_int_1chw, base_depth_estimator_fn, processing_res=768, denoising_steps=1
                                         )
 
                                         depth_pred = torch.from_numpy(out.depth_np).to(

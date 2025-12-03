@@ -4,6 +4,7 @@
 import argparse
 import logging
 import os
+from pathlib import Path
 
 os.environ["XFORMERS_DISABLED"] = "1"
 
@@ -11,31 +12,31 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from omegaconf import OmegaConf
-from PIL import Image
+from PIL import Image 
+from torchvision.transforms.functional import pil_to_tensor, resize
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-from .sharpdepth.pipeline.pipeline import SharpDepthPipeline
 
 import debugpy
 
-from .base_depth_estimators import get_base_depth_estimator_fn
-from .sharpdepth_kinds import SharpDepthKind
+from .depth_estimators import get_depth_estimator_fn, ModelArchitecture
+from .preprocessors import MarigoldPreProcessor
 
 if "__main__" == __name__:
     logging.basicConfig(level=logging.INFO)
 
     # -------------------- Arguments --------------------
     parser = argparse.ArgumentParser(
-        description="Run single-image depth estimation using SharpDepth."
-    )
-    parser.add_argument(
-        "--checkpoint",
-        type=str,
-        default="prs-eth/marigold-v1-0",
-        help="Checkpoint path or hub name.",
-    )
-    parser.add_argument("--input_dir", type=str, required=True, help="Input image directory")
-    parser.add_argument("--output_dir", type=str, required=True, help="Output directory.")
+        description="Evaluate model outputs."
+    ) 
+
+    parser.add_argument("--checkpoint", type=str, required=True, help="Checkpoint of model.")
+
+    # NOTE: There are two modes for inferences: txt and dir mode. If txt is specified, it is in txt mode, otherwise dir mode.
+    parser.add_argument("--input_dir", type=str, required=True, help="Input image dataset directory")
+    parser.add_argument("--input_txt", type=str, help="Txt filepath containing paths of images to infer and labels") 
+
+    parser.add_argument("--output_dir", type=str, required=True, help="Output depth dataset directory.") 
 
     # inference setting
     parser.add_argument(
@@ -47,7 +48,7 @@ if "__main__" == __name__:
 
     parser.add_argument("--seed", type=int, default=None, help="Random seed.")
 
-    parser.add_argument("--base_model", type=str, default="unidepth", help="Base model to use for depth estimation. Options: unidepth, depth_anything_small, depth_anything_large, pixel_perfect_depth")
+    parser.add_argument("--model_architecture", type=str, default="unidepth", help=f"Model to use for depth estimation. Options: {[e.value for e in ModelArchitecture]}")
     parser.add_argument("--debug", action="store_true", help="Debug mode.")
 
     args = parser.parse_args()
@@ -60,8 +61,10 @@ if "__main__" == __name__:
 
 
     checkpoint_path = args.checkpoint
-    output_dir = args.output_dir
-    input_dir = args.input_dir
+    model_architecture = ModelArchitecture(args.model_architecture)
+    output_dir = str(Path(os.environ["BASE_PREDS_DIR"]) / args.output_dir / model_architecture.value)
+    input_dir = str(Path(os.environ["BASE_DATA_DIR"]) / args.input_dir)
+    input_txt = args.input_txt
     half_precision = args.half_precision
 
     seed = args.seed
@@ -92,23 +95,41 @@ if "__main__" == __name__:
         dtype = torch.float32
         variant = None
 
-    pipeline = SharpDepthPipeline.from_pretrained(checkpoint_path, sharpdepth_kind=SharpDepthKind.LOTUS, default_processing_resolution=768, default_denoising_steps=1)
-    assert pipeline.default_processing_resolution == 768, f"default_processing_resolution = {pipeline.default_processing_resolution}, expected 768"
-    assert pipeline.default_denoising_steps == 1, f"default_denoising_steps = {pipeline.default_denoising_steps}, expected 1"
+    # Determine img paths depending on mode.
+    if not input_txt:
+        imgs = listsorted(os.listdir(input_dir))
+    else:
+        with open(input_txt, "r") as f:
+            # EXPECTED FORMAT PER LINE: '{rgb_path} {depth_label_path}'
+            lines = [line.strip() for line in f.readlines()]
+            imgs = [line.split(" ")[0] for line in lines]
+            depths = [line.split(" ")[1] for line in lines]
 
-    pipeline = pipeline.to(device, dtype=dtype)
+    model_infer_fn = get_depth_estimator_fn(model_architecture, device, dtype, checkpoint_path)
 
-    base_depth_estimator_fn = get_base_depth_estimator_fn(args.base_model, device, dtype)
-
-    imgs = sorted(os.listdir(input_dir))
     # -------------------- Inference and saving --------------------
     with torch.no_grad():
-        for batch in tqdm(imgs):
+        for i, img in tqdm(list(enumerate(imgs))):
+            img_path = os.path.join(input_dir, img)
             # Read input image
-            rgb = Image.open(os.path.join(input_dir, batch))
-            if args.debug: print("filename: ", os.path.join(input_dir, batch))
-            out = pipeline(rgb, base_depth_estimator_fn)
+            input_image = Image.open(img_path).convert("RGB")
+            # convert to torch tensor [H, W, rgb] -> [rgb, H, W]
+            rgb_int_1chw = pil_to_tensor(input_image)
+            rgb_int_1chw = rgb_int_1chw.unsqueeze(0)  # [1, rgb, H, W], dtype int
+            rgb_int_1chw = rgb_int_1chw.to(torch.int32)
 
-            out.depth_base_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}.jpg"))
-            out.depth_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}_sharpdepth.png"))
+            if args.debug: print("filename: ", img)
+
+            depth_np_11hw = model_infer_fn(rgb_int_1chw, MarigoldPreProcessor)
+            depth_np_11hw = depth_np_11hw.cpu().numpy()
+            save_path = os.path.join(output_dir, img)
+            os.makedirs(Path(save_path).parent, exist_ok=True)
+            np.save(save_path, depth_np_11hw)
+
+            #out.depth_base_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}.jpg"))
+            #out.depth_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}_sharpdepth.png"))
+
+    
+    print(f"successfully saved outputs to {output_dir}.")
+
 
