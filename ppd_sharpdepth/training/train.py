@@ -1049,7 +1049,7 @@ if "__main__" == __name__:
                     # image, _, _ = pipeline.image_processor.preprocess(rgb, 768, "bilinear", accelerator.device)  # [N,3,PPH,PPW]
 
                     rgb_int_1chw = (rgb * 255).to(torch.int32)
-                    disp_base = disp_base_11hw = base_depth_estimator_fn(rgb_int_1chw, rgb_int_1chw)
+                    disp_base = disp_base_11hw = base_depth_estimator_fn(rgb, rgb_int_1chw)
                     assert disp_base_11hw.shape[2:] == rgb.shape[2:], f"Base depth map doesn't match its input image resolution! disp_base_11hw.shape[2:] = {disp_base_11hw.shape[2:]}, rgb_float_1chw.shape[2:] = {rgb.shape[2:]}"
 
                 normalize_obj = depth_normalizer(disp_base)

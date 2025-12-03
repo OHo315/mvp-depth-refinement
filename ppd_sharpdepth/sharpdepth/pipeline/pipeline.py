@@ -294,7 +294,7 @@ class SharpDepthPipeline(DiffusionPipeline):
             rgb_float_1chw = rgb_float_1chw_resized
             rgb_int_1chw = (rgb_float_1chw * 255).to(torch.int32)
 
-            depth_base = depth_base_11hw = base_depth_estimator_fn(rgb_int_1chw, rgb_int_1chw)
+            depth_base = depth_base_11hw = base_depth_estimator_fn(rgb_float_1chw, rgb_int_1chw)
 
             normalize_obj = self.depth_normalizer(depth_base_11hw)
             norm_base_depth = normalize_obj["norm_depth"].to(dtype=self.unet.dtype)
