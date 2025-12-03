@@ -214,6 +214,10 @@ class SharpDepthPipeline(DiffusionPipeline):
             - **uncertainty** (`None` or `np.ndarray`) Uncalibrated uncertainty(MAD, median absolute deviation)
                     coming from ensembling. None if `ensemble_size = 1`
         """
+
+        assert isinstance(rgb_int_1chw, torch.Tensor), "rgb_int_1chw must be a torch.Tensor"
+        assert rgb_int_1chw.dtype == torch.int32, "rgb_int_1chw must be of dtype torch.int32"
+
         # Model-specific optimal default values leading to fast and reasonable results.
         if denoising_steps is None:
             denoising_steps = self.default_denoising_steps
@@ -231,9 +235,9 @@ class SharpDepthPipeline(DiffusionPipeline):
         if self.sharpdepth_kind == SharpDepthKind.LOTUS:
             depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, MarigoldPreProcessor)
 
-            preprocessed_image_1chw, padding, original_resolution, rgb_int_1chw = MarigoldPreProcessor.run(rgb_int_1chw, self.device, self.dtype)
+            rgb_float_1chw_resized, padding, original_resolution = MarigoldPreProcessor.run(rgb_int_1chw, self.device, self.dtype)
 
-            rgb_norm =  preprocessed_image_1chw * 2.0 - 1.0  #  [0, 255] -> [-1, 1]
+            rgb_norm =  rgb_float_1chw_resized * 2.0 - 1.0  #  [0, 1] -> [-1, 1]
             rgb_norm = rgb_norm.to(self.dtype).to(self.device)
 
             normalize_obj = self.depth_normalizer(depth_base)
@@ -277,15 +281,17 @@ class SharpDepthPipeline(DiffusionPipeline):
         elif self.sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH: 
             depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, PixelPerfectDepthPreProcessor)
 
+            rgb_float_1chw_resized, *_ = PixelPerfectDepthPreProcessor.run(rgb_int_1chw, self.device, self.dtype)
+
             normalize_obj = self.depth_normalizer(depth_base_11hw)
             norm_base_depth = normalize_obj["norm_depth"].to(dtype=self.unet.dtype)
             norm_base_depth = norm_base_depth * 0.5 + 0.5
 
             # initial PPD
-            cond = rgb_float_1chw - 0.5
+            cond = rgb_float_1chw_resized - 0.5
             noise = torch.randn(size=[cond.shape[0], 1, cond.shape[2], cond.shape[3]]).to(self.device)
             with torch.autocast(self.device.type,dtype=self.unet.dtype):
-                semantics = self.frozen_unet.semantics_prompt(rgb_float_1chw)
+                semantics = self.frozen_unet.semantics_prompt(rgb_float_1chw_resized)
                 latent = noise
                 for timestep in self.frozen_unet.sampling_timesteps:
                     input = torch.cat([latent, cond], dim=1)

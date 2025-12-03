@@ -1032,7 +1032,8 @@ if "__main__" == __name__:
                     # but it's in the original sharpdepth code, so we'll keep it.
                     # image, _, _ = pipeline.image_processor.preprocess(rgb, 768, "bilinear", accelerator.device)  # [N,3,PPH,PPW]
 
-                    disp_base = disp_base_11hw = base_depth_estimator_fn(rgb, rgb)
+                    rgb_int_1chw = (rgb * 255).to(torch.int32)
+                    disp_base = disp_base_11hw = base_depth_estimator_fn(rgb_int_1chw, rgb_int_1chw)
                     assert disp_base_11hw.shape[2:] == rgb.shape[2:], f"Base depth map doesn't match its input image resolution! disp_base_11hw.shape[2:] = {disp_base_11hw.shape[2:]}, rgb_float_1chw.shape[2:] = {rgb.shape[2:]}"
 
                 normalize_obj = depth_normalizer(disp_base)
@@ -1380,8 +1381,9 @@ if "__main__" == __name__:
                                             .numpy()
                                             .astype(np.uint8)
                                         )
+                                        rgb_int_1chw = torch.from_numpy(np.array(rgb)).to(torch.int32).permute(2, 0, 1).unsqueeze(0)
                                         out = pipeline(
-                                            rgb, base_depth_estimator_fn, processing_res=768, denoising_steps=1
+                                            rgb_int_1chw, base_depth_estimator_fn, processing_res=768, denoising_steps=1
                                         )
 
                                         depth_pred = torch.from_numpy(out.depth_np).to(
