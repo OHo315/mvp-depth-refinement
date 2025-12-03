@@ -8,3 +8,4 @@ __pycache__
 /train_output
 /checkpoints
 /wandb
+/patchrefiner/work_dir
