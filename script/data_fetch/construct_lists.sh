@@ -22,7 +22,7 @@
 HYPERSIM_TXT_DIRPATH="$BASE_DATA_DIR/../data_split/hypersim_depth"
 
 for SPLIT in train val test; do
-	HYPERSIM_TXT_FILEPATH="$HYPERSIM_TXT_DIRPATH/hypersim_$SPLIT_filename_list.txt"
+	HYPERSIM_TXT_FILEPATH="$HYPERSIM_TXT_DIRPATH/hypersim_${SPLIT}_filename_list.txt"
 	HYPERSIM_DATADIR="$BASE_DATA_DIR/hypersim_processed/$SPLIT"
 	mkdir -p $HYPERSIM_TXT_DIRPATH
 	tmp1=$(mktemp)
