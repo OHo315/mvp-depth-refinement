@@ -11,22 +11,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from omegaconf import OmegaConf
-from PIL import Image
+from PIL import Image 
+from torchvision.transforms.functional import pil_to_tensor, resize
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-from .sharpdepth.pipeline.pipeline import SharpDepthPipeline
 
 import debugpy
 
-from .base_depth_estimators import get_base_depth_estimator_fn
-from .sharpdepth_kinds import SharpDepthKind
+from .depth_estimators import get_depth_estimator_fn, ModelArchitecture
 
 if "__main__" == __name__:
     logging.basicConfig(level=logging.INFO)
 
     # -------------------- Arguments --------------------
     parser = argparse.ArgumentParser(
-        description="Run single-image depth estimation using SharpDepth."
+        description="Run single-image depth estimation."
     )
     parser.add_argument(
         "--checkpoint",
@@ -47,7 +46,7 @@ if "__main__" == __name__:
 
     parser.add_argument("--seed", type=int, default=None, help="Random seed.")
 
-    parser.add_argument("--base_model", type=str, default="unidepth", help="Base model to use for depth estimation. Options: unidepth, depth_anything_small, depth_anything_large, pixel_perfect_depth")
+    parser.add_argument("--model", type=str, default="unidepth", help="Model to use for depth estimation. Options: unidepth, depth_anything_small, depth_anything_large, pixel_perfect_depth")
     parser.add_argument("--debug", action="store_true", help="Debug mode.")
 
     args = parser.parse_args()
@@ -92,23 +91,26 @@ if "__main__" == __name__:
         dtype = torch.float32
         variant = None
 
-    pipeline = SharpDepthPipeline.from_pretrained(checkpoint_path, sharpdepth_kind=SharpDepthKind.LOTUS, default_processing_resolution=768, default_denoising_steps=1)
-    assert pipeline.default_processing_resolution == 768, f"default_processing_resolution = {pipeline.default_processing_resolution}, expected 768"
-    assert pipeline.default_denoising_steps == 1, f"default_denoising_steps = {pipeline.default_denoising_steps}, expected 1"
-
-    pipeline = pipeline.to(device, dtype=dtype)
-
-    base_depth_estimator_fn = get_base_depth_estimator_fn(args.base_model, device, dtype)
+    model_infer_fn = get_depth_estimator_fn(ModelArchitecture(args.model), device, dtype, args.checkpoint)
 
     imgs = sorted(os.listdir(input_dir))
     # -------------------- Inference and saving --------------------
     with torch.no_grad():
-        for batch in tqdm(imgs):
+        for img in tqdm(imgs):
             # Read input image
-            rgb = Image.open(os.path.join(input_dir, batch))
-            if args.debug: print("filename: ", os.path.join(input_dir, batch))
-            out = pipeline(rgb, base_depth_estimator_fn)
+            input_image = Image.open(os.path.join(input_dir, img))
+            input_image = input_image.convert("RGB")
+            # convert to torch tensor [H, W, rgb] -> [rgb, H, W]
+            rgb_int_1chw = pil_to_tensor(input_image)
+            rgb_int_1chw = rgb_int_1chw.unsqueeze(0)  # [1, rgb, H, W], dtype int
 
-            out.depth_base_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}.jpg"))
-            out.depth_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}_sharpdepth.png"))
+            if args.debug: print("filename: ", os.path.join(input_dir, img))
+
+            depth_np_11hw = model_infer_fn(rgb_int_1chw)
+            depth_np_11hw = depth_np_11hw.cpu().numpy()
+            save_path = os.path.join(output_dir, img.split(".")[0] + f"_{args.model}.jpg")
+            np.save(save_path, depth_np_11hw)
+
+            #out.depth_base_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}.jpg"))
+            #out.depth_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}_sharpdepth.png"))
 
