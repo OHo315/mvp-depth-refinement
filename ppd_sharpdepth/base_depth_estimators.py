@@ -113,6 +113,7 @@ def get_base_depth_estimator_fn(base_model: str, device: torch.device, dtype: to
                 return_scale_shift=True,
                 max_resolution=None,
             )
+            depth_11hw_aligned = torch.from_numpy(depth_11hw_aligned).to(device)
 
             return torch.exp(depth_11hw_aligned) - 1
 

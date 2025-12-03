@@ -340,6 +340,7 @@ class SharpDepthPipeline(DiffusionPipeline):
                 return_scale_shift=True,
                 max_resolution=None,
             )
+            student_pred_depth_aligned = torch.from_numpy(student_pred_depth_aligned).to(self.device)
             student_pred_depth = torch.exp(student_pred_depth_aligned) - 1
 
         else:
