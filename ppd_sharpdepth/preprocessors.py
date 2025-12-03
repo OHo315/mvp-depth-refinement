@@ -31,6 +31,8 @@ class MarigoldPreProcessor(PreProcessor):
         processing_res = 0
         resample_method = "bilinear"
 
+        rgb_int_1chw = rgb_int_1chw.to(torch.uint8)
+
         rgb_float_1chw_resized, padding, original_resolution = image_processor.preprocess(rgb_int_1chw, processing_res, resample_method, device)  # [N,3,PPH,PPW]
         
         assert rgb_float_1chw_resized.dtype == float_dtype, f"rgb_float_1chw_resized must be of dtype {float_dtype}, got {rgb_float_1chw_resized.dtype}"

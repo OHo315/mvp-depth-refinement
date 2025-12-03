@@ -20,6 +20,7 @@ from tqdm.auto import tqdm
 import debugpy
 
 from .depth_estimators import get_depth_estimator_fn, ModelArchitecture
+from .preprocessors import MarigoldPreProcessor
 
 if "__main__" == __name__:
     logging.basicConfig(level=logging.INFO)
@@ -110,20 +111,16 @@ if "__main__" == __name__:
     with torch.no_grad():
         for i, img in tqdm(list(enumerate(imgs))):
             img_path = os.path.join(input_dir, img)
-            depth_path = os.path.join(input_dir, depths[i])
             # Read input image
             input_image = Image.open(img_path).convert("RGB")
-            input_depth = Image.open(depth_path).convert("RGB")
             # convert to torch tensor [H, W, rgb] -> [rgb, H, W]
             rgb_int_1chw = pil_to_tensor(input_image)
             rgb_int_1chw = rgb_int_1chw.unsqueeze(0)  # [1, rgb, H, W], dtype int
-
-            depth_int_1chw = pil_to_tensor(input_depth)
-            depth_int_1chw = depth_int_1chw.unsqueeze(0)  # [1, rgb, H, W], dtype int
+            rgb_int_1chw = rgb_int_1chw.to(torch.int32)
 
             if args.debug: print("filename: ", img)
 
-            depth_np_11hw = model_infer_fn(rgb_int_1chw)
+            depth_np_11hw = model_infer_fn(rgb_int_1chw, MarigoldPreProcessor)
             depth_np_11hw = depth_np_11hw.cpu().numpy()
             save_path = os.path.join(output_dir, img)
             os.makedirs(Path(save_path).parent, exist_ok=True)
