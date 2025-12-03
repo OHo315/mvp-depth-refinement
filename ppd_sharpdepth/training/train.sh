@@ -26,7 +26,7 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --tracker_project_name ppd_sharpdepth_train \
     --wandb_name "good_config_no_log_${num_gpus}_gpus" \
     --set_grads_to_none \
-    --checkpointing_steps 5000 \
+    --checkpointing_steps 500 \
     --validation_steps 100 \
     --train_batch_size 1 \
     --gradient_accumulation_steps $gradient_accumulation_steps \
