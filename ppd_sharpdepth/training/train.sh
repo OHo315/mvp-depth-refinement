@@ -24,10 +24,10 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --lr_scheduler cosine \
     --lr_warmup_steps 100 \
     --tracker_project_name ppd_sharpdepth_train \
-    --wandb_name "good_config_no_log_${num_gpus}_gpus" \
+    --wandb_name "depth_anything_small" \
     --set_grads_to_none \
     --checkpointing_steps 500 \
-    --validation_steps 100 \
+    --validation_steps 200 \
     --train_batch_size 1 \
     --gradient_accumulation_steps $gradient_accumulation_steps \
     --num_train_epochs 1 \
@@ -35,7 +35,7 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --base_data_dir "$WORKSPACE_DIR/data/" \
     --config "$WORKSPACE_DIR/config/train_marigold_depth.yaml" \
     --output_dir "$WORKSPACE_DIR/train_output/" \
-    --base_model unidepth \
+    --base_model depth_anything_small \
     --denoiser pixel_perfect_depth \
     --use_conditioning_probability 0.8 \
     --dit_patch_encoder_lr_multiplier 0.01 \

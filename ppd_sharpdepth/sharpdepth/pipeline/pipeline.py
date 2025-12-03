@@ -292,8 +292,9 @@ class SharpDepthPipeline(DiffusionPipeline):
             hp, wp, _ = resized_rgb_float_HpWpC.shape
             rgb_float_1chw_resized = torch.from_numpy(resized_rgb_float_HpWpC).permute(2, 0, 1).unsqueeze(0).to(device=self.device, dtype=rgb_float_1chw.dtype)
             rgb_float_1chw = rgb_float_1chw_resized
+            rgb_int_1chw = (rgb_float_1chw * 255).to(torch.int32)
 
-            depth_base = depth_base_11hw = base_depth_estimator_fn(rgb_float_1chw_resized, rgb_float_1chw_resized)
+            depth_base = depth_base_11hw = base_depth_estimator_fn(rgb_int_1chw, rgb_int_1chw)
 
             normalize_obj = self.depth_normalizer(depth_base_11hw)
             norm_base_depth = normalize_obj["norm_depth"].to(dtype=self.unet.dtype)
