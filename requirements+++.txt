@@ -1,0 +1,5 @@
+mmengine
+transformers>=4.32.1
+kornia
+scikit-image
+timm
