@@ -37,8 +37,6 @@ from diffusers.pipelines.marigold.marigold_image_processing import MarigoldImage
 
 from ppd_sharpdepth.sharpdepth_kinds import SharpDepthKind
 
-from ppd_sharpdepth.preprocessors import PreProcessor, MarigoldPreProcessor, PixelPerfectDepthPreProcessor
-
 class SharpDepthOutput(BaseOutput):
     """
     Output class for Marigold Monocular Depth Estimation pipeline.
@@ -113,7 +111,6 @@ class SharpDepthPipeline(DiffusionPipeline):
         default_denoising_steps: Optional[int] = None,
         default_processing_resolution: Optional[int] = None,
         sharpdepth_kind: Optional[SharpDepthKind] = None,
-        base_depth_estimator_fn=None,
     ):
         super().__init__()
 
@@ -153,13 +150,11 @@ class SharpDepthPipeline(DiffusionPipeline):
         assert sharpdepth_kind is not None, "must pass sharpdepth_kind to SharpDepthPipeline"
         self.sharpdepth_kind = sharpdepth_kind
 
-        assert base_depth_estimator_fn is not None, "must pass base_depth_estimator_fn to SharpDepthPipeline"
-        self.base_depth_estimator_fn = base_depth_estimator_fn
-
     @torch.no_grad()
     def __call__(
         self,
-        rgb_int_1chw: torch.Tensor,
+        input_image: Union[Image.Image, torch.Tensor],
+        base_depth_estimator_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
         intrinsics=None,
         denoising_steps: Optional[int] = None,
         processing_res: Optional[int] = None,
@@ -214,6 +209,10 @@ class SharpDepthPipeline(DiffusionPipeline):
             - **uncertainty** (`None` or `np.ndarray`) Uncalibrated uncertainty(MAD, median absolute deviation)
                     coming from ensembling. None if `ensemble_size = 1`
         """
+
+	print("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$4")
+	print(processing_res)
+	print(resample_method)
         # Model-specific optimal default values leading to fast and reasonable results.
         if denoising_steps is None:
             denoising_steps = self.default_denoising_steps
@@ -223,17 +222,32 @@ class SharpDepthPipeline(DiffusionPipeline):
         assert processing_res >= 0
 
         self.encode_empty_text()
+        # ----------------- Image Preprocess -----------------
+        # Convert to torch tensor
+        if isinstance(input_image, Image.Image):
+            input_image = input_image.convert("RGB")
+            # convert to torch tensor [H, W, rgb] -> [rgb, H, W]
+            rgb_int_1chw = pil_to_tensor(input_image)
+            rgb_int_1chw = rgb_int_1chw.unsqueeze(0)  # [1, rgb, H, W], dtype int
+        elif isinstance(input_image, torch.Tensor):
+            rgb_int_1chw = input_image
+        else:
+            raise TypeError(f"Unknown input type: {type(input_image) = }")
         input_size = rgb_int_1chw.shape
         assert (
             4 == rgb_int_1chw.dim() and 3 == input_size[-3]
         ), f"Wrong input shape {input_size}, expected [1, rgb, H, W]"
 
+        image, padding, original_resolution = self.image_processor.preprocess(rgb_int_1chw, processing_res, resample_method, self.device)  # [N,3,PPH,PPW]
+        # Resize image
+
+        # Normalize rgb values
+
         if self.sharpdepth_kind == SharpDepthKind.LOTUS:
-            depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, MarigoldPreProcessor)
+            depth_base = base_depth_estimator_fn(image, rgb_int_1chw)
 
-            preprocessed_image_1chw, padding, original_resolution, rgb_int_1chw = MarigoldPreProcessor.run(rgb_int_1chw, self.device, self.dtype)
-
-            rgb_norm =  preprocessed_image_1chw * 2.0 - 1.0  #  [0, 255] -> [-1, 1]
+        
+            rgb_norm = image * 2.0 - 1.0  #  [0, 255] -> [-1, 1]
             rgb_norm = rgb_norm.to(self.dtype).to(self.device)
 
             normalize_obj = self.depth_normalizer(depth_base)
@@ -274,8 +288,16 @@ class SharpDepthPipeline(DiffusionPipeline):
             latent = pred_latent / self.vae.config.scaling_factor
             z = self.vae.post_quant_conv(latent.to(self.vae.dtype))
             lotus_depth = self.vae.decoder(z).mean(dim=1, keepdim=True)
-        elif self.sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH: 
-            depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, PixelPerfectDepthPreProcessor)
+        elif self.sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
+
+            rgb_float_1chw = rgb_int_1chw.to(self.unet.dtype) / 255.0
+            rgb_float_hwc = rgb_float_1chw.squeeze(0).permute(1, 2, 0).cpu().float().numpy()
+            resized_rgb_float_HpWpC = resize_keep_aspect(rgb_float_hwc)
+            hp, wp, _ = resized_rgb_float_HpWpC.shape
+            rgb_float_1chw_resized = torch.from_numpy(resized_rgb_float_HpWpC).permute(2, 0, 1).unsqueeze(0).to(device=self.device, dtype=rgb_float_1chw.dtype)
+            rgb_float_1chw = rgb_float_1chw_resized
+
+            depth_base = depth_base_11hw = base_depth_estimator_fn(rgb_float_1chw_resized, rgb_float_1chw_resized)
 
             normalize_obj = self.depth_normalizer(torch.log(depth_base_11hw + 1))
             norm_base_depth = normalize_obj["norm_depth"].to(dtype=self.unet.dtype)
