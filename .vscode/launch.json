@@ -21,7 +21,7 @@
       "cwd": "${workspaceFolder}",
       "env": {
         "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}",
-        "CUDA_VISIBLE_DEVICES": "1"
+        "CUDA_VISIBLE_DEVICES": "6"
       },
       "args": [
         "--sds_loss_weight", "100.0",
@@ -38,7 +38,7 @@
         "--lr_scheduler", "cosine",
         "--lr_warmup_steps", "100",
         "--tracker_project_name", "ppd_sharpdepth_train",
-        "--wandb_name", "good_config",
+        "--wandb_name", "good_config_no_log",
         "--set_grads_to_none",
         "--checkpointing_steps", "5000",
         "--validation_steps", "100",

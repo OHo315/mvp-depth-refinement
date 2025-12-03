@@ -5,27 +5,31 @@ export PYTHONPATH="$WORKSPACE_DIR":$PYTHONPATH
 echo $WORKSPACE_DIR
 echo $PYTHONPATH
 
-    # --report_to wandb \
+num_gpus=$NUM_GPUS
+macrobatch_size=8
 
-accelerate launch --num_processes 2 --gpu-ids 0,1 ppd_sharpdepth/training/train.py \
+gradient_accumulation_steps=$((macrobatch_size / num_gpus))
+
+accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --sds_loss_weight 100.0 \
     --depth_weight 0.4 \
     --base_ckpt_dir andrew-healey/sharpdepth \
     --student_ckpt_dir andrew-healey/sharpdepth \
     --add_datetime_prefix \
+    --report_to wandb \
     --mixed_precision bf16 \
     --seed 42 \
     --allow_tf32 \
     --learning_rate 1e-5 \
-    --wandb_name "lr_1e-5" \
     --lr_scheduler cosine \
-    --lr_warmup_steps 150 \
+    --lr_warmup_steps 100 \
     --tracker_project_name ppd_sharpdepth_train \
+    --wandb_name "good_config_no_log_${num_gpus}_gpus" \
     --set_grads_to_none \
     --checkpointing_steps 5000 \
     --validation_steps 100 \
     --train_batch_size 1 \
-    --gradient_accumulation_steps 4 \
+    --gradient_accumulation_steps $gradient_accumulation_steps \
     --num_train_epochs 1 \
     --use_ema \
     --base_data_dir "$WORKSPACE_DIR/data/" \

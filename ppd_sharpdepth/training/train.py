@@ -44,7 +44,7 @@ from ema_pytorch import EMA
 from omegaconf import OmegaConf
 from packaging import version
 from PIL import Image
-from torch.utils.data import ConcatDataset, DataLoader
+from torch.utils.data import ConcatDataset, DataLoader, Dataset
 from tqdm import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 from ppd_sharpdepth.base_depth_estimators import get_base_depth_estimator_fn
@@ -454,8 +454,6 @@ if "__main__" == __name__:
     # -------------------- set seed --------------------
     if args.seed is not None:
         set_seed(args.seed)
-    
-    conditioning_rng = np.random.default_rng(args.seed + 47 * accelerator.process_index)
     # ---------------------------------------------------------------------
 
     # -------------------- create logging folder --------------------
@@ -547,6 +545,14 @@ if "__main__" == __name__:
         augmentation_args=cfg.augmentation,
     )
 
+    class IndexedDataset(Dataset):
+        def __init__(self, dataset):
+            self.dataset = dataset
+        def __len__(self):
+            return len(self.dataset)
+        def __getitem__(self, index):
+            return self.dataset[index], index
+
     if "mixed" == cfg_data.train.name:
         for data in train_dataset:
             if len(data) == 0:
@@ -557,6 +563,7 @@ if "__main__" == __name__:
                 dataset_ls
             ), "Lengths don't match: `prob_ls` and `dataset_list`"
         concat_dataset = ConcatDataset(dataset_ls)
+        concat_dataset_with_idx = IndexedDataset(concat_dataset)
         mixed_sampler = MixedBatchSampler(
             src_dataset_ls=dataset_ls,
             batch_size=args.train_batch_size,
@@ -566,9 +573,20 @@ if "__main__" == __name__:
             generator=loader_generator,
         )
         train_dataloader = DataLoader(
-            concat_dataset,
+            concat_dataset_with_idx,
             batch_sampler=mixed_sampler,
             num_workers=cfg.dataloader.num_train_workers,
+        )
+    elif "concat" == cfg_data.train.name:
+        concat = ConcatDataset(train_dataset)
+        concat_with_idx = IndexedDataset(concat)
+
+        train_dataloader = DataLoader(
+            concat_with_idx,
+            batch_size=args.train_batch_size,
+            shuffle=True,
+            num_workers=cfg.dataloader.num_train_workers,
+            generator=loader_generator
         )
 
     # Validation dataset
@@ -818,7 +836,7 @@ if "__main__" == __name__:
         commit = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()
         diff = subprocess.check_output(["git", "diff", commit]).decode("utf-8")
 
-        if len(diff) > 10000: raise ValueError("Git diff is too large, please commit some of your work before training")
+        if len(diff) > 30000: raise ValueError("Git diff is too large, please commit some of your work before training")
 
         print(f"Commit: {commit}")
         print("<diff>")
@@ -937,12 +955,20 @@ if "__main__" == __name__:
 
                 loss_exponential_moving_averages[conditioning_kind][loss_key] = new_loss
 
+    loss_accum = torch.tensor(0.0, device=device, dtype=torch.float32)
+    last_loss_accum = torch.tensor(0.0, device=device, dtype=torch.float32)
 
     for epoch in range(first_epoch, args.num_train_epochs):
         student_denoiser.train()
-        for step, batch in enumerate(train_dataloader):
+        for step, (batch, row_idx) in enumerate(train_dataloader):
             with accelerator.accumulate(student_denoiser):
                 og_batch = batch
+
+                torch.manual_seed(row_idx.item())
+                torch.cuda.manual_seed(row_idx.item())
+                np.random.seed(row_idx.item())
+                random.seed(row_idx.item())
+
                 #desired_batch_keys = {"rgb_int", "depth_raw_linear", "valid_mask_raw"}
                 desired_batch_keys = {"rgb_int"}
                 assert set(batch.keys()) >= desired_batch_keys, f"Invalid batch keys: {set(batch.keys())}. expected it to contain at least these keys: {desired_batch_keys}"
@@ -1072,7 +1098,7 @@ if "__main__" == __name__:
                         )
 
                         # ah ok, a simple way to mitigate catastrophic forgetting. makes sense, I think.
-                        if conditioning_rng.random() < args.use_conditioning_probability:
+                        if torch.rand(1).item() < args.use_conditioning_probability:
                             conditioning_kind = "cond"
                             noisy_latent = noisy_lotus_latent * latent_mask + unidepth_latent * (
                                 1 - latent_mask
@@ -1129,7 +1155,7 @@ if "__main__" == __name__:
                     # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
 
                     initial_depth_loss = None
-                    if conditioning_rng.random() < args.compute_initial_depth_loss_probability:
+                    if torch.rand(1).item() < args.compute_initial_depth_loss_probability:
                         with torch.no_grad():
 
                             frozen_pred_depth_aligned, _, _ = align_depth_least_square(
@@ -1173,7 +1199,7 @@ if "__main__" == __name__:
                         
                         timestep = unwrapped_student_denoiser.sampling_timesteps[random.randrange(0, len(unwrapped_student_denoiser.sampling_timesteps) - 1)]
 
-                        should_use_conditioning = conditioning_rng.random() < args.use_conditioning_probability
+                        should_use_conditioning = torch.rand(1).item() < args.use_conditioning_probability
                         if should_use_conditioning:
                             conditioning_kind = "cond"
                             x0 = norm_base_depth - 0.5
@@ -1217,7 +1243,7 @@ if "__main__" == __name__:
                     # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
 
                     initial_depth_loss = None
-                    if conditioning_rng.random() < args.compute_initial_depth_loss_probability:
+                    if torch.rand(1).item() < args.compute_initial_depth_loss_probability:
                         with torch.no_grad():
 
                             frozen_pred_depth_aligned, _, _ = align_depth_least_square(
@@ -1242,8 +1268,16 @@ if "__main__" == __name__:
                 # ------------------------------------------------------------------
                 # Optimization
                 loss = sds_loss * args.sds_loss_weight + depth_loss * args.depth_weight
+                loss_accum += loss.detach()
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
+
+                    loss_accum /= accelerator.gradient_accumulation_steps
+                    loss_accum = accelerator.reduce(loss_accum, reduction="mean")
+
+                    last_loss_accum = loss_accum
+                    loss_accum = torch.tensor(0.0, device=device, dtype=loss.dtype)
+
                     if args.use_ema:
                         ema_model.update()
 
@@ -1481,17 +1515,26 @@ if "__main__" == __name__:
                         "depth": (depth_loss.detach(), torch.tensor(1,device=depth_loss.device)),
                         "initial_depth": (initial_depth_loss.detach() if initial_depth_loss is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_loss.device) if initial_depth_loss is not None else torch.tensor(0,device=device)),
                     },
-                    **{empty_conditioning_kind:{loss_key:(torch.tensor(0,device=device),torch.tensor(0,device=device)) for loss_key in loss_keys} for empty_conditioning_kind in conditioning_kinds if empty_conditioning_kind not in [conditioning_kind, "all"]}
+                    **{empty_conditioning_kind:{loss_key:(torch.tensor(0,device=device,dtype=loss.dtype),torch.tensor(0,device=device,dtype=loss.dtype)) for loss_key in loss_keys} for empty_conditioning_kind in conditioning_kinds if empty_conditioning_kind not in [conditioning_kind, "all"]}
                 }
 
                 # average the losses and counts across devices!
                 if accelerator.num_processes > 1:
-                    accumulated_losses_and_counts = accelerator.reduce(losses_and_counts, reduction="sum")
-                    losses_and_counts = {conditioning_kind: {loss_key: (torch.nan_to_num(loss_accum / num_examples.float(), nan=0.0), num_examples) for loss_key, (loss_accum, num_examples) in accumulated_losses_and_counts[conditioning_kind].items()} for conditioning_kind in conditioning_kinds}
 
+                    accumulated_losses_and_counts = {}
+                    for k in sorted(losses_and_counts.keys()):
+                        accumulated_losses_and_counts[k] = {}
+                        for loss_key in sorted(losses_and_counts[k].keys()):
+                            raw_item = losses_and_counts[k][loss_key]
+                            summed_item = accelerator.reduce((raw_item[0].to(torch.float32), raw_item[1].to(torch.int32)), reduction="sum")
+                            accumulated_losses_and_counts[k][loss_key] = (summed_item[0] / summed_item[1] if summed_item[1] > 0 else torch.tensor(0.0, device=summed_item[0].device), summed_item[1])
+
+                    losses_and_counts = accumulated_losses_and_counts
+                
                 update_loss_exponential_moving_averages(losses_and_counts)
 
                 logs = {
+                    "loss": round(last_loss_accum.cpu().item(), 4),
                     **{f"loss_{conditioning_kind}_{loss_key}": round(loss_exponential_moving_averages[conditioning_kind][loss_key].item(), 4) for conditioning_kind in conditioning_kinds for loss_key in loss_keys},
                     "lr": lr_scheduler.get_last_lr()[0],
                 }

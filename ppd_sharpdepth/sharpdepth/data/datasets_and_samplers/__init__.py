@@ -37,7 +37,7 @@ dataset_name_class_dict = {
 def get_dataset(
     cfg_data_split, base_data_dir: str, mode: DatasetMode, **kwargs
 ) -> BaseDepthDataset:
-    if "mixed" == cfg_data_split.name:
+    if cfg_data_split.name in ["mixed", "concat"]:
         dataset_ls = [
             get_dataset(_cfg, base_data_dir, mode, **kwargs)
             for _cfg in cfg_data_split.dataset_list
