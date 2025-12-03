@@ -13,7 +13,7 @@ from typing import List
 import debugpy
 from diffusers.pipelines.marigold.marigold_image_processing import MarigoldImageProcessor
 from ppd_sharpdepth.depth_estimators import ModelArchitecture, get_depth_estimator_fn
-from ppd_sharpdepth.preprocessors import MarigoldPreProcessor
+from ppd_sharpdepth.preprocessors import MarigoldPreProcessor, PixelPerfectDepthPreProcessor
 from ppd_sharpdepth.sharpdepth.util.alignment import align_depth_least_square
 
 import subprocess
@@ -1005,57 +1005,17 @@ if "__main__" == __name__:
 
                 rgb = batch["rgb_int"].to(weight_dtype) / 255.0
 
-                if sharpdepth_kind == SharpDepthKind.LOTUS:
-                    # don't resize
-
-                    rgb_float_1chw_resized, padding, original_resolution = MarigoldPreProcessor.run(batch["rgb_int"], device, weight_dtype)
-                    rgb_int_1chw_resized = (rgb_float_1chw_resized * 255.0).to(batch["rgb_int"].dtype)
-                    batch_resized = {
-                        "rgb_int": rgb_int_1chw_resized,
-                        "depth_raw_linear": None,
-                        "valid_mask_raw": None,
-                    }
-
-                    batch = batch_resized
-                    rgb = rgb_float_1chw_resized
-
-                elif sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
-
-                    rgb_float_hwc = rgb.squeeze(0).permute(1, 2, 0).cpu().float().numpy()
-                    resized_rgb_float_HpWpC = resize_keep_aspect(rgb_float_hwc)
-                    hp, wp, _ = resized_rgb_float_HpWpC.shape
-                    rgb_float_1chw_resized = torch.from_numpy(resized_rgb_float_HpWpC).permute(2, 0, 1).unsqueeze(0).to(device=rgb.device, dtype=rgb.dtype)
-                    rgb_int_1chw_resized = (rgb_float_1chw_resized * 255.0).to(batch["rgb_int"].dtype)
-
-#                    depth_raw_linear_11hw = batch["depth_raw_linear"]
-#                    depth_raw_linear_hw1 = batch["depth_raw_linear"].squeeze(0,1).unsqueeze(-1).cpu().numpy()
-#                    depth_raw_linear_hw1_resized = cv2_interpolate(depth_raw_linear_hw1, (wp, hp))
-#                    depth_raw_linear_11hw_resized = torch.from_numpy(depth_raw_linear_hw1_resized).squeeze(-1)[None,None,:,:].to(device=depth_raw_linear_11hw.device, dtype=depth_raw_linear_11hw.dtype)
-#
-#                    valid_mask_raw_11hw_bool = batch["valid_mask_raw"]
-#                    valid_mask_raw_hw1_float = batch["valid_mask_raw"].squeeze(0,1).unsqueeze(-1).cpu().float().numpy()
-#                    valid_mask_raw_hw1_float_resized = cv2_interpolate(valid_mask_raw_hw1_float, (wp, hp))
-#                    valid_mask_raw_11hw_bool_resized = torch.from_numpy(valid_mask_raw_hw1_float_resized).squeeze(-1)[None,None,:,:].to(device=valid_mask_raw_11hw_bool.device, dtype=valid_mask_raw_11hw_bool.dtype)
-#
-                    #batch_resized = {
-                    #    "rgb_int":          rgb_int_1chw_resized,
-                    #    "depth_raw_linear": depth_raw_linear_11hw_resized,
-                    #    "valid_mask_raw":   valid_mask_raw_11hw_bool_resized,
-                    #}
-                    batch_resized = {
-                        "rgb_int":          rgb_int_1chw_resized,
-                        "depth_raw_linear": None,
-                        "valid_mask_raw":   None,
-                    }
-
-                    batch = batch_resized
-                    rgb = rgb_float_1chw_resized
-
-                    padding = (0,0)
-
-                else:
-                    raise NotImplementedError(f"Image resizing not implemented for denoiser={sharpdepth_kind}")
-                
+                assert sharpdepth_kind in [SharpDepthKind.LOTUS, SharpDepthKind.PIXEL_PERFECT_DEPTH], f"Invalid sharpdepth kind: {sharpdepth_kind}"
+                preprocessor = MarigoldPreProcessor if sharpdepth_kind == SharpDepthKind.LOTUS else PixelPerfectDepthPreProcessor
+                rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(batch["rgb_int"], device, weight_dtype)
+                rgb_int_1chw_resized = (rgb_float_1chw_resized * 255.0).to(batch["rgb_int"].dtype)
+                batch_resized = {
+                    "rgb_int": rgb_int_1chw_resized,
+                    "depth_raw_linear": None,
+                    "valid_mask_raw": None,
+                }
+                batch = batch_resized
+                rgb = rgb_float_1chw_resized
 
                 ## UniDepth ##
 
@@ -1067,8 +1027,7 @@ if "__main__" == __name__:
                     # but it's in the original sharpdepth code, so we'll keep it.
                     # image, _, _ = pipeline.image_processor.preprocess(rgb, 768, "bilinear", accelerator.device)  # [N,3,PPH,PPW]
 
-                    rgb_int_1chw = (rgb * 255).to(torch.int32)
-                    disp_base = disp_base_11hw = base_depth_estimator_fn(rgb, rgb_int_1chw)
+                    disp_base = disp_base_11hw = base_depth_estimator_fn(og_batch["rgb_int"], preprocessor)
                     assert disp_base_11hw.shape[2:] == rgb.shape[2:], f"Base depth map doesn't match its input image resolution! disp_base_11hw.shape[2:] = {disp_base_11hw.shape[2:]}, rgb_float_1chw.shape[2:] = {rgb.shape[2:]}"
 
                 normalize_obj = depth_normalizer(disp_base)
@@ -1409,6 +1368,7 @@ if "__main__" == __name__:
                                 default_processing_resolution=default_processing_resolution,
                                 default_denoising_steps=default_denoising_steps,
                                 sharpdepth_kind=sharpdepth_kind,
+                                base_depth_estimator_fn=base_depth_estimator_fn,
                             ).to(accelerator.device, dtype=weight_dtype)
                             with torch.no_grad():
                                 images = []

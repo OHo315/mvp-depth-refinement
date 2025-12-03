@@ -100,6 +100,7 @@ def get_depth_estimator_fn(
 
             pipeline = pipeline.to(device, dtype=float_dtype)
 
+            @torch.autocast(device_type=device.type, dtype=float_dtype)
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
                 out = pipeline(rgb_int_1chw)
 
@@ -134,6 +135,7 @@ def get_depth_estimator_fn(
 
             pipeline = pipeline.to(device, dtype=float_dtype)
 
+            @torch.autocast(device_type=device.type, dtype=float_dtype)
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
                 out = pipeline(rgb_int_1chw)
 
@@ -148,6 +150,7 @@ def get_depth_estimator_fn(
             unidepth = unidepth.to(device, dtype=float_dtype)
             unidepth.requires_grad_(False)
 
+            @torch.autocast(device_type=device.type, dtype=float_dtype)
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
                 
                 rgb_float_1chw_resized, *_ = preprocessor.run(rgb_int_1chw, device, float_dtype)
@@ -195,6 +198,7 @@ def get_depth_estimator_fn(
                 ]
             )
 
+            @torch.autocast(device_type=device.type, dtype=float_dtype)
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]): 
 
                 rgb_float_1chw_resized, *_ = preprocessor.run(rgb_int_1chw, device, float_dtype)
@@ -251,6 +255,7 @@ def get_depth_estimator_fn(
             model = model.to(device).eval()
             model.requires_grad_(False)
 
+            @torch.autocast(device_type=device.type, dtype=float_dtype)
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
  
                 rgb_float_1chw_resized, *_ = preprocessor.run(rgb_int_1chw, device, float_dtype)

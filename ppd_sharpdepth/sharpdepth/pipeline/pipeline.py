@@ -278,9 +278,14 @@ class SharpDepthPipeline(DiffusionPipeline):
             latent = pred_latent / self.vae.config.scaling_factor
             z = self.vae.post_quant_conv(latent.to(self.vae.dtype))
             lotus_depth = self.vae.decoder(z).mean(dim=1, keepdim=True)
+
+            student_pred_depth = lotus_depth
+            depth_base_11hw = depth_base
+            initial_pred = lotus_depth_initial
+            l1_error = l1_error
         elif self.sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH: 
             depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, PixelPerfectDepthPreProcessor)
-            rgb_float_1chw_resized, *_ = PixelPerfectDepthPreProcessor.run(rgb_int_1chw, self.device, self.dtype)
+            rgb_float_1chw_resized, padding, original_resolution = PixelPerfectDepthPreProcessor.run(rgb_int_1chw, self.device, self.dtype)
 
             normalize_obj = self.depth_normalizer(depth_base_11hw)
             norm_base_depth = normalize_obj["norm_depth"].to(dtype=self.unet.dtype)
@@ -296,7 +301,7 @@ class SharpDepthPipeline(DiffusionPipeline):
                     input = torch.cat([latent, cond], dim=1)
                     pred = self.frozen_unet.dit(x=input, semantics=semantics, timestep=timestep)
                     latent = self.frozen_unet.sampler.step(pred=pred, x_t=latent, t=timestep)
-                frozen_pred_depth = latent + 0.5
+                initial_pred = frozen_pred_depth = latent + 0.5
         
             # compute difference mask
             l1_error = torch.abs(frozen_pred_depth - norm_base_depth)
@@ -315,23 +320,15 @@ class SharpDepthPipeline(DiffusionPipeline):
                     pred = self.unet.dit(x=student_input, semantics=semantics, timestep=timestep)
                     latent = self.unet.sampler.step(pred=pred, x_t=latent, t=timestep)
                 student_pred_depth = latent + 0.5
-
+            
         else:
             raise NotImplementedError(f"SharpDepthKind {self.sharpdepth_kind} not implemented yet")
 
         
-        if self.sharpdepth_kind == SharpDepthKind.LOTUS:
-            final_pred = self.image_processor.unpad_image(lotus_depth, padding)  # [N*E,1,PH,PW]
-            base_pred = self.image_processor.unpad_image(depth_base, padding)  # [N*E,1,PH,PW]
-            initial_pred = self.image_processor.unpad_image(lotus_depth_initial, padding)  # [N*E,1,PH,PW]
-            l1_error = self.image_processor.unpad_image(l1_error, padding)  # [N*E,1,PH,PW]
-        elif self.sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
-            final_pred = student_pred_depth
-            base_pred = depth_base_11hw
-            initial_pred = frozen_pred_depth
-            l1_error = l1_error
-        else:
-            raise NotImplementedError(f"SharpDepthKind {self.sharpdepth_kind} not implemented yet")
+        final_pred = self.image_processor.unpad_image(student_pred_depth, padding)  # [N*E,1,PH,PW]
+        base_pred = self.image_processor.unpad_image(depth_base_11hw, padding)  # [N*E,1,PH,PW]
+        initial_pred = self.image_processor.unpad_image(initial_pred, padding)  # [N*E,1,PH,PW]
+        l1_error = self.image_processor.unpad_image(l1_error, padding)  # [N*E,1,PH,PW]
         
         final_pred = self.image_processor.resize_antialias(final_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
         base_pred = self.image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]

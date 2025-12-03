@@ -43,6 +43,7 @@ class PixelPerfectDepthPreProcessor(PreProcessor):
     def run(rgb_int_1chw: torch.Tensor, device: torch.device, float_dtype: torch.dtype):
         assert rgb_int_1chw.dtype == torch.int32, f"rgb_int_1chw must be of dtype torch.int32, got {rgb_int_1chw.dtype}"
         assert float_dtype in float_dtypes, f"float_dtype must be one of {float_dtypes}, got {float_dtype}"
+        h, w = rgb_int_1chw.shape[-2:]
 
         rgb_float_1chw = rgb_int_1chw.to(float_dtype) / 255.0
         rgb_float_hwc = rgb_float_1chw.squeeze(0).permute(1, 2, 0).cpu().float().numpy()
@@ -51,4 +52,4 @@ class PixelPerfectDepthPreProcessor(PreProcessor):
         rgb_float_1chw_resized = torch.from_numpy(resized_rgb_float_HpWpC).permute(2, 0, 1).unsqueeze(0).to(device=device, dtype=rgb_float_1chw.dtype)
 
         assert rgb_float_1chw_resized.dtype in float_dtypes, f"rgb_float_1chw_resized must be of dtype {float_dtypes}, got {rgb_float_1chw_resized.dtype}"
-        return rgb_float_1chw_resized.to(float_dtype), None, None
+        return rgb_float_1chw_resized.to(float_dtype), (0,0), (h, w)
