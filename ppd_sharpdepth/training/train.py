@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 import debugpy
+from diffusers.pipelines.marigold.marigold_image_processing import MarigoldImageProcessor
+from ppd_sharpdepth.preprocessors import MarigoldPreProcessor
 from ppd_sharpdepth.sharpdepth.util.alignment import align_depth_least_square
 
 import subprocess
@@ -986,7 +988,18 @@ if "__main__" == __name__:
 
                 if sharpdepth_kind == SharpDepthKind.LOTUS:
                     # don't resize
-                    pass
+
+                    rgb_float_1chw_resized, padding, original_resolution = MarigoldPreProcessor.run(batch["rgb_int"], device, weight_dtype)
+                    rgb_int_1chw_resized = (rgb_float_1chw_resized * 255.0).to(batch["rgb_int"].dtype)
+                    batch_resized = {
+                        "rgb_int": rgb_int_1chw_resized,
+                        "depth_raw_linear": None,
+                        "valid_mask_raw": None,
+                    }
+
+                    batch = batch_resized
+                    rgb = rgb_float_1chw_resized
+
                 elif sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
 
                     rgb_float_hwc = rgb.squeeze(0).permute(1, 2, 0).cpu().float().numpy()
@@ -1038,6 +1051,7 @@ if "__main__" == __name__:
 
                 normalize_obj = depth_normalizer(disp_base)
                 norm_base_depth = normalize_obj["norm_depth"].to(dtype=weight_dtype)
+                norm_base_depth_unpadded = norm_base_depth[:,:,:norm_base_depth.shape[2]-padding[0],:norm_base_depth.shape[3]-padding[1]]
 
                 if sharpdepth_kind == SharpDepthKind.LOTUS:
 
@@ -1091,11 +1105,15 @@ if "__main__" == __name__:
                         z = vae.post_quant_conv(latent.to(weight_dtype))
                         frozen_pred_depth = vae.decoder(z).mean(dim=1, keepdim=True)
 
+                        frozen_pred_depth_unpadded = frozen_pred_depth[:,:,:frozen_pred_depth.shape[2]-padding[0],:frozen_pred_depth.shape[3]-padding[1]]
+
                         # ---------------------------------
                         # calculate difference
                         l1_error = torch.abs(frozen_pred_depth - norm_base_depth)
                         l1_error = l1_error / l1_error.max()
                         l1_error = l1_error.clip(0, 1)
+
+                        l1_error_unpadded = l1_error[:,:,:l1_error.shape[2]-padding[0],:l1_error.shape[3]-padding[1]]
 
                         latent_mask = torch.nn.functional.interpolate(l1_error, scale_factor=1 / 8)
 
@@ -1155,8 +1173,10 @@ if "__main__" == __name__:
                     z = vae.post_quant_conv(latent.to(weight_dtype))
                     pred_depth = vae.decoder(z).mean(dim=1, keepdim=True)
 
+                    pred_depth_unpadded = pred_depth[:,:,:pred_depth.shape[2]-padding[0],:pred_depth.shape[3]-padding[1]]
+
                     depth_loss = l1_loss(
-                        pred_depth * 0.5 + 0.5, norm_base_depth * 0.5 + 0.5, l1_error
+                        pred_depth_unpadded * 0.5 + 0.5, norm_base_depth_unpadded * 0.5 + 0.5, l1_error_unpadded
                     )
 
                     # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
@@ -1166,16 +1186,16 @@ if "__main__" == __name__:
                         with torch.no_grad():
 
                             frozen_pred_depth_aligned, _, _ = align_depth_least_square(
-                                gt_arr=(norm_base_depth * 0.5 + 0.5).detach().float().cpu().numpy(),
-                                pred_arr=frozen_pred_depth.detach().float().cpu().numpy(),
-                                valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
+                                gt_arr=(norm_base_depth_unpadded * 0.5 + 0.5).detach().float().cpu().numpy(),
+                                pred_arr=frozen_pred_depth_unpadded.detach().float().cpu().numpy(),
+                                valid_mask_arr=torch.ones_like(l1_error_unpadded).detach().bool().cpu().numpy(),
                                 return_scale_shift=True,
                                 max_resolution=None,
                             )
                             frozen_pred_depth_aligned = torch.from_numpy(frozen_pred_depth_aligned).to(device)
 
                             initial_depth_loss = l1_loss(
-                                frozen_pred_depth_aligned, norm_base_depth * 0.5 + 0.5, l1_error
+                                frozen_pred_depth_aligned, norm_base_depth_unpadded * 0.5 + 0.5, l1_error_unpadded
                             )
 
 

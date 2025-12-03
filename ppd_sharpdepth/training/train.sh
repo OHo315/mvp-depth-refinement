@@ -11,7 +11,7 @@ macrobatch_size=8
 gradient_accumulation_steps=$((macrobatch_size / num_gpus))
 
 accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
-    --sds_loss_weight 100.0 \
+    --sds_loss_weight 1.0 \
     --depth_weight 0.4 \
     --base_ckpt_dir andrew-healey/sharpdepth \
     --student_ckpt_dir andrew-healey/sharpdepth \
@@ -20,11 +20,11 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --mixed_precision bf16 \
     --seed 42 \
     --allow_tf32 \
-    --learning_rate 1e-5 \
+    --learning_rate 0.5e-5 \
     --lr_scheduler cosine \
     --lr_warmup_steps 100 \
     --tracker_project_name ppd_sharpdepth_train \
-    --wandb_name "depth_anything_small" \
+    --wandb_name "lotus_half_lr" \
     --set_grads_to_none \
     --checkpointing_steps 500 \
     --validation_steps 200 \
@@ -35,8 +35,8 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --base_data_dir "$WORKSPACE_DIR/data/" \
     --config "$WORKSPACE_DIR/config/train_marigold_depth.yaml" \
     --output_dir "$WORKSPACE_DIR/train_output/" \
-    --base_model depth_anything_small \
-    --denoiser pixel_perfect_depth \
+    --base_model unidepth \
+    --denoiser lotus \
     --use_conditioning_probability 0.8 \
     --dit_patch_encoder_lr_multiplier 0.01 \
     "$@"
