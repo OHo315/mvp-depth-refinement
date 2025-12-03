@@ -218,6 +218,7 @@ if "__main__" == __name__:
         default="prs-eth/marigold-v1-0",
         help="directory of pretrained checkpoint",
     )
+    parser.add_argument("--student_ckpt_dir_revision", type=str, default=None, help="Revision of the student checkpoint HF Hub model")
     parser.add_argument(
         "--add_datetime_prefix",
         action="store_true",
@@ -406,6 +407,7 @@ if "__main__" == __name__:
         args.base_ckpt_dir if args.base_ckpt_dir is not None else os.environ["BASE_CKPT_DIR"]
     )
     student_ckpt_dir = args.student_ckpt_dir
+    student_ckpt_dir_revision = args.student_ckpt_dir_revision
 
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
@@ -481,7 +483,7 @@ if "__main__" == __name__:
 
             for model in models:
                 sub_dir = (
-                    denoiser_subfolder
+                    (denoiser_subfolder if model == unwrap_model(student_denoiser) else frozen_denoiser_subfolder)
                     if isinstance(model, type(unwrap_model(student_denoiser)))
                     else "text_encoder"
                 )
@@ -641,7 +643,7 @@ if "__main__" == __name__:
     text_encoder.requires_grad_(False)
 
     student_denoiser = denoiser_cls.from_pretrained(
-        student_ckpt_dir, subfolder=denoiser_subfolder, revision=None
+        student_ckpt_dir, subfolder=denoiser_subfolder, revision=student_ckpt_dir_revision
     )
     student_denoiser.requires_grad_(True)
     if sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
