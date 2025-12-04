@@ -23,6 +23,8 @@ import sys
 import shlex
 import tempfile
 
+from script.evaluation.metrics import rmse
+
 os.environ["XFORMERS_DISABLED"] = "1"
 
 from diffusers.models.attention_processor import AttnProcessor2_0
@@ -1426,6 +1428,10 @@ if "__main__" == __name__:
                                 sharpdepth_kind=sharpdepth_kind,
                                 base_depth_estimator_fn=base_depth_estimator_fn,
                             ).to(accelerator.device, dtype=weight_dtype)
+                            avg_rmse = 0.0
+                            avg_rmse_base = 0.0
+                            avg_rmse_initial = 0.0
+                            total_images = 0
                             with torch.no_grad():
                                 images = []
                                 for loader_idx, loader in enumerate(val_loaders):
@@ -1433,7 +1439,7 @@ if "__main__" == __name__:
                                     for vis_idx, batch in enumerate(loader):
                                         vis_imgs = {}
                                         images[loader_idx].append(vis_imgs)
-                                        if vis_idx > 4:
+                                        if vis_idx > 5:
                                             continue
                                         rgb = Image.fromarray(
                                             batch["rgb_int"]
@@ -1457,6 +1463,16 @@ if "__main__" == __name__:
                                         depth_initial_np = torch.from_numpy(out.depth_initial_np).to(
                                             accelerator.device
                                         )
+
+                                        depth_raw_linear_np = batch["depth_raw_linear"].squeeze().cpu().numpy()
+                                        valid_mask_raw_np = batch["valid_mask_raw"].squeeze().cpu().numpy()
+                                        rmse_final = rmse(out.depth_np, depth_raw_linear_np, valid_mask_raw_np)
+                                        rmse_base = rmse(out.depth_base_np, depth_raw_linear_np, valid_mask_raw_np)
+                                        rmse_initial = rmse(out.depth_initial_np, depth_raw_linear_np, valid_mask_raw_np)
+                                        avg_rmse += rmse_final
+                                        avg_rmse_base += rmse_base
+                                        avg_rmse_initial += rmse_initial
+                                        total_images += 1
 
                                         gt = (
                                             batch["depth_raw_linear"]
@@ -1566,6 +1582,16 @@ if "__main__" == __name__:
                                     wandb_log_obj[f"grid_{k}"] = wandb.Image(grid)
                                 if args.report_to == "wandb":
                                     wandb_tracker.log(wandb_log_obj)
+                            
+                            avg_rmse /= total_images
+                            avg_rmse_base /= total_images
+                            avg_rmse_initial /= total_images
+                            logs = {
+                                "val_rmse": round(avg_rmse.cpu().item(), 4),
+                                "val_rmse_base": round(avg_rmse_base.cpu().item(), 4),
+                                "val_rmse_initial": round(avg_rmse_initial.cpu().item(), 4),
+                            }
+                            accelerator.log(logs, step=global_step)
 
                             del pipeline
                             torch.cuda.empty_cache()
