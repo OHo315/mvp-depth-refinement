@@ -20,6 +20,7 @@ from .depth_anything.dpt import DepthAnything
 from .depth_anything.util.transform import Resize, NormalizeImage, PrepareForNet
 from torchvision.transforms import Compose
 import cv2
+from diffusers.pipelines.marigold.marigold_image_processing import MarigoldImageProcessor
 
 from huggingface_hub import hf_hub_download
 from ppd_sharpdepth.ppd.models.ppd import PixelPerfectDepth
@@ -165,11 +166,21 @@ def get_depth_estimator_fn(
 
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
                 
-                rgb_float_1chw_resized, *_ = preprocessor.run(rgb_int_1chw, device, float_dtype)
+                rgb_float_1chw_resized, _, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
 
-                ret_11hw = unidepth.infer(
+                base_pred = unidepth.infer(
                     (rgb_float_1chw_resized * 255).squeeze().int()
                 )["depth"]
+
+                image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
+                # Rescale to original resolution.
+                base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+
+                # Convert to numpy
+                base_pred = base_pred.squeeze().float().cpu().numpy()
+
+                ret_11hw = torch.from_numpy(base_pred)
+
                 return ret_11hw
 
                 # sanity check, for reference:
@@ -267,11 +278,12 @@ def get_depth_estimator_fn(
             model.requires_grad_(False)
 
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
+                preprocessor = PixelPerfectDepthPreProcessor
  
                 rgb_float_1chw_resized, *_ = preprocessor.run(rgb_int_1chw, device, float_dtype)
                 rgb_int_1chw_resized = (rgb_float_1chw_resized * 255).to(torch.int32)
 
-                metric_depth_base = depth_anything_small_fn(rgb_int_1chw_resized)
+                metric_depth_base = depth_anything_small_fn(rgb_int_1chw, preprocessor)
 
                 H, W = rgb_float_1chw_resized.squeeze(0).shape[1:3]
                 raw_image_hwc = (
