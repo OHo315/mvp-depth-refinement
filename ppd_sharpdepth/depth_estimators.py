@@ -171,7 +171,7 @@ def get_depth_estimator_fn(
                 
                 rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
 
-                base_pred = unidepth.infer(
+                ret_11hw = unidepth.infer(
                     (rgb_float_1chw_resized * 255).squeeze().int()
                 )["depth"]
 
@@ -322,6 +322,7 @@ def get_depth_estimator_fn(
                 if internal:
                     return depth_11hw_aligned
 
+<<<<<<< HEAD
                 image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
                 base_pred = image_processor.unpad_image(depth_11hw_aligned, padding)  # [N*E,1,PH,PW]
                 base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
@@ -330,6 +331,9 @@ def get_depth_estimator_fn(
                 ret_11hw = base_pred
 
                 return ret_11hw
+=======
+                return depth_11hw_aligned
+>>>>>>> 0892041d07ad196b7787288a05633ab9d1925967
 
 
                 # sanity check (passes!)

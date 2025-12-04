@@ -14,12 +14,13 @@ dataset:
     filenames: data_split/nyu_depth/labeled/filename_list_test.txt
     eigen_valid_mask: true
 
-  # - name: kitti_depth
-  #   disp_name: kitti_depth_val_full
-  #   dir: kitti_raw/
-  #   filenames: data_split/kitti_depth/eigen_test_files_with_gt.txt
-  #   kitti_bm_crop: true
-  #   valid_mask_crop: eigen
+  - name: kitti
+    disp_name: kitti_depth
+    dir: kitti_raw
+    filenames: data_split/kitti_depth/eigen_test_files_with_gt_filtered.txt
+    kitti_bm_crop: false
+    valid_mask_crop: eigen
+
 
   # # Smaller subsets for faster validation during training
   # # The first dataset is used to calculate main eval metric.
