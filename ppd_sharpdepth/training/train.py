@@ -969,8 +969,13 @@ if "__main__" == __name__:
     last_loss_accum = torch.tensor(0.0, device=device, dtype=torch.float32)
 
     for epoch in range(first_epoch, args.num_train_epochs):
+
+        curr_train_dataloader = train_dataloader
+        if epoch == first_epoch and global_step > epoch * num_update_steps_per_epoch and global_step < (epoch + 1) * num_update_steps_per_epoch:
+            curr_train_dataloader = accelerator.skip_first_batches(train_dataloader, (global_step - epoch * num_update_steps_per_epoch) * accelerator.gradient_accumulation_steps)
+
         student_denoiser.train()
-        for step, (batch, row_idx) in enumerate(train_dataloader):
+        for step, (batch, row_idx) in enumerate(curr_train_dataloader):
             with accelerator.accumulate(student_denoiser):
                 og_batch = batch
 

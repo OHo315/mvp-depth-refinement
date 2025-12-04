@@ -11,6 +11,7 @@ macrobatch_size=8
 gradient_accumulation_steps=$((macrobatch_size / num_gpus))
 
     # --student_ckpt_dir_revision depth_anything_small_run \
+    # --student_ckpt_dir_revision unidepth_partial \
 accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --sds_loss_weight 100.0 \
     --depth_weight 0.4 \
@@ -21,11 +22,11 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --mixed_precision bf16 \
     --seed 42 \
     --allow_tf32 \
-    --learning_rate 0.5e-5 \
+    --learning_rate 1e-5 \
     --lr_scheduler cosine \
     --lr_warmup_steps 100 \
     --tracker_project_name ppd_sharpdepth_train \
-    --wandb_name "half_lr" \
+    --wandb_name "lr=1e-5" \
     --set_grads_to_none \
     --checkpointing_steps 500 \
     --validation_steps 200 \
