@@ -395,6 +395,7 @@ if "__main__" == __name__:
     parser.add_argument("--compute_initial_depth_loss_probability", type=float, default=1.0, help="Probability of computing the initial depth loss")
     parser.add_argument("--dit_patch_encoder_lr_multiplier", type=float, default=0.01, help="Multiplier for the learning rate of the DiT patch encoder")
     parser.add_argument("--sds_loss_weight", type=float, default=1.0, help="Weight for the SDS loss")
+    parser.add_argument("--noise_aware_latent_noise_scale", type=float, default=1.0, help="Scale for the noise aware latent noise. 0 means no noise, 1 means default behavior.")
 
     args = parser.parse_args()
 
@@ -966,7 +967,7 @@ if "__main__" == __name__:
     # and when it is, it might appear more times in one batch than another
 
     conditioning_kinds = ["no_cond","cond", "all"]
-    loss_keys = ["total","sds","depth","initial_depth","depth_mse","initial_depth_mse"]
+    loss_keys = ["total","sds","depth","initial_depth","depth_mse","initial_depth_mse","depth_aligned_mse"]
 
     # initialize EMA buffers at 0
     loss_exponential_moving_averages = { conditioning_kind: { loss_key: 0.0 for loss_key in loss_keys } for conditioning_kind in conditioning_kinds }
@@ -1213,7 +1214,8 @@ if "__main__" == __name__:
                         if should_use_conditioning:
                             conditioning_kind = "cond"
                             x0 = norm_base_depth - 0.5
-                            noisy_depth_cond = norm_base_depth * (1 - l1_mask) + (torch.randn_like(x0) * l1_mask)
+                            scaled_l1_mask = l1_mask * args.noise_aware_latent_noise_scale
+                            noisy_depth_cond = (norm_base_depth - 0.5) * (1 - scaled_l1_mask) + (torch.randn_like(x0) * scaled_l1_mask)
                             xT = torch.randn_like(latent)
 
                             xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
@@ -1250,6 +1252,18 @@ if "__main__" == __name__:
                         student_pred_depth_latent + 0.5, x0 + 0.5, l1_error
                     )
                     depth_mse = F.mse_loss(student_pred_depth_latent + 0.5, x0 + 0.5, reduction="mean")
+
+                    with torch.no_grad():
+
+                        final_pred_depth_aligned, _, _ = align_depth_least_square(
+                            gt_arr=(x0 + 0.5).detach().float().cpu().numpy(),
+                            pred_arr=student_pred_depth.detach().float().cpu().numpy(),
+                            valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
+                            return_scale_shift=True,
+                            max_resolution=None,
+                        )
+                        final_pred_depth_aligned = torch.from_numpy(final_pred_depth_aligned).to(device)
+                        final_aligned_depth_mse = F.mse_loss(final_pred_depth_aligned, x0 + 0.5, reduction="mean")
 
                     # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
 
@@ -1523,6 +1537,7 @@ if "__main__" == __name__:
                         "sds": (sds_loss.detach(), torch.tensor(1,device=sds_loss.device)),
                         "depth": (depth_loss.detach(), torch.tensor(1,device=depth_loss.device)),
                         "depth_mse": (depth_mse.detach(), torch.tensor(1,device=depth_mse.device)),
+                        "depth_aligned_mse": (final_aligned_depth_mse.detach(), torch.tensor(1,device=final_aligned_depth_mse.device)),
                         "initial_depth": (initial_depth_loss.detach() if initial_depth_loss is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_loss.device) if initial_depth_loss is not None else torch.tensor(0,device=device)),
                         "initial_depth_mse": (initial_depth_mse.detach() if initial_depth_mse is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_mse.device) if initial_depth_mse is not None else torch.tensor(0,device=device)),
                     },
@@ -1531,6 +1546,7 @@ if "__main__" == __name__:
                         "sds": (sds_loss.detach(), torch.tensor(1,device=sds_loss.device)),
                         "depth": (depth_loss.detach(), torch.tensor(1,device=depth_loss.device)),
                         "depth_mse": (depth_mse.detach(), torch.tensor(1,device=depth_mse.device)),
+                        "depth_aligned_mse": (final_aligned_depth_mse.detach(), torch.tensor(1,device=final_aligned_depth_mse.device)),
                         "initial_depth": (initial_depth_loss.detach() if initial_depth_loss is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_loss.device) if initial_depth_loss is not None else torch.tensor(0,device=device)),
                         "initial_depth_mse": (initial_depth_mse.detach() if initial_depth_mse is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_mse.device) if initial_depth_mse is not None else torch.tensor(0,device=device)),
                     },
