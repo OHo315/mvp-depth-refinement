@@ -32,7 +32,7 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --validation_steps 200 \
     --train_batch_size 1 \
     --gradient_accumulation_steps $gradient_accumulation_steps \
-    --num_train_epochs 1 \
+    --num_train_epochs 8 \
     --use_ema \
     --base_data_dir "$WORKSPACE_DIR/data/" \
     --config "$WORKSPACE_DIR/config/train_marigold_depth.yaml" \
@@ -41,4 +41,5 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --denoiser pixel_perfect_depth \
     --use_conditioning_probability 0.8 \
     --dit_patch_encoder_lr_multiplier 0.01 \
+    --blur_unidepth_output_ratio 32 \
     "$@"

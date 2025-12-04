@@ -394,6 +394,7 @@ if "__main__" == __name__:
     parser.add_argument("--compute_initial_depth_loss_probability", type=float, default=1.0, help="Probability of computing the initial depth loss")
     parser.add_argument("--dit_patch_encoder_lr_multiplier", type=float, default=0.01, help="Multiplier for the learning rate of the DiT patch encoder")
     parser.add_argument("--sds_loss_weight", type=float, default=1.0, help="Weight for the SDS loss")
+    parser.add_argument("--blur_unidepth_output_ratio", type=int, default=1, help="Ratio of downscaling the unidepth output, for guidance, l1 error, and depth loss computation")
 
     args = parser.parse_args()
 
@@ -1065,6 +1066,8 @@ if "__main__" == __name__:
 
                 if sharpdepth_kind == SharpDepthKind.LOTUS:
 
+                    assert args.blur_unidepth_output_ratio == 1, "Blurring the unidepth output is not supported for Lotus"
+
                     # 1. Encode depth (totally lotus-specific)
                     unidepth_latent = encode_depth(vae, norm_base_depth)
 
@@ -1231,7 +1234,21 @@ if "__main__" == __name__:
                     
                         # ---------------------------------
                         # calculate difference
-                        l1_error = torch.abs(frozen_pred_depth - norm_base_depth)
+
+                        def blur(x_11hw, scale_factor):
+                            small_h = x_11hw.shape[2] // scale_factor
+                            small_w = x_11hw.shape[3] // scale_factor
+                            downscaled = F.resize(x_11hw, size=(small_h, small_w), mode="bilinear", align_corners=False)
+                            upscaled = F.resize(downscaled, size=(x_11hw.shape[2], x_11hw.shape[3]), mode="bilinear", align_corners=False)
+                            return upscaled
+                        
+                        def maybe_blur(x_11hw):
+                            if args.blur_unidepth_output_ratio != 1:
+                                return blur(x_11hw, args.blur_unidepth_output_ratio)
+                            else:
+                                return x_11hw
+                            
+                        l1_error = torch.abs(maybe_blur(frozen_pred_depth) - maybe_blur(norm_base_depth))
                         l1_error = l1_error / l1_error.max()
                         l1_error = l1_error.clip(0, 1)
                         l1_mask = l1_error
@@ -1247,7 +1264,7 @@ if "__main__" == __name__:
 
                             xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
 
-                            student_input = torch.cat([xt, cond, noisy_depth_cond], dim=1)
+                            student_input = torch.cat([xt, cond, maybe_blur(noisy_depth_cond)], dim=1)
                         else:
                             conditioning_kind = "no_cond"
                             x0 = frozen_pred_depth - 0.5
@@ -1255,7 +1272,7 @@ if "__main__" == __name__:
                             xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
                             noisy_depth_cond = torch.randn_like(xt)
 
-                            student_input = torch.cat([xt, cond, noisy_depth_cond], dim=1)
+                            student_input = torch.cat([xt, cond, maybe_blur(noisy_depth_cond)], dim=1)
                     
                     with torch.autocast(device.type,dtype=weight_dtype):
                         student_pred_depth_latent_velocity = student_denoiser(x=student_input, semantics=semantics, timestep=timestep)
@@ -1276,7 +1293,7 @@ if "__main__" == __name__:
                     sds_loss = 0.5 * F.mse_loss(student_pred_depth_latent, (student_pred_depth_latent - score_vector).detach(), reduction="mean")
 
                     depth_loss = l1_loss(
-                        student_pred_depth_latent + 0.5, x0 + 0.5, l1_error
+                        maybe_blur(student_pred_depth_latent + 0.5), maybe_blur(x0 + 0.5), l1_error
                     )
                     depth_mse = F.mse_loss(student_pred_depth_latent + 0.5, x0 + 0.5, reduction="mean")
 
@@ -1296,7 +1313,7 @@ if "__main__" == __name__:
                             frozen_pred_depth_aligned = torch.from_numpy(frozen_pred_depth_aligned).to(device)
 
                             initial_depth_loss = l1_loss(
-                                frozen_pred_depth_aligned, x0 + 0.5, l1_error
+                                maybe_blur(frozen_pred_depth_aligned), maybe_blur(x0 + 0.5), l1_error
                             )
                             initial_depth_mse = F.mse_loss(frozen_pred_depth_aligned, x0 + 0.5, reduction="mean")
 
