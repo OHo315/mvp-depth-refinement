@@ -316,16 +316,17 @@ class SharpDepthPipeline(DiffusionPipeline):
             cond = rgb_float_1chw_resized - 0.5
             noise = torch.randn(size=[cond.shape[0], 1, cond.shape[2], cond.shape[3]]).to(self.device)
             with torch.autocast(self.device.type,dtype=self.unet.dtype):
-                semantics = self.frozen_unet.semantics_prompt(rgb_float_1chw_resized)
+                semantics = self.unet.semantics_prompt(rgb_float_1chw_resized)
                 latent = noise
-                for timestep in self.frozen_unet.sampling_timesteps:
-                    input = torch.cat([latent, cond], dim=1)
-                    pred = self.frozen_unet.dit(x=input, semantics=semantics, timestep=timestep)
-                    latent = self.frozen_unet.sampler.step(pred=pred, x_t=latent, t=timestep)
-                initial_pred = frozen_pred_depth = latent + 0.5
+                cond_noise = torch.randn_like(latent)
+                for timestep in self.unet.sampling_timesteps:
+                    input = torch.cat([latent, cond, maybe_blur(cond_noise)], dim=1)
+                    pred = self.unet.dit(x=input, semantics=semantics, timestep=timestep)
+                    latent = self.unet.sampler.step(pred=pred, x_t=latent, t=timestep)
+                initial_pred = latent + 0.5
         
             # compute difference mask
-            l1_error = torch.abs(maybe_blur(frozen_pred_depth) - maybe_blur(norm_base_depth))
+            l1_error = torch.abs(maybe_blur(initial_pred) - maybe_blur(norm_base_depth))
             l1_error = l1_error / l1_error.max()
             l1_error = l1_error.clip(0, 1)
             l1_mask = l1_error
@@ -365,14 +366,15 @@ class SharpDepthPipeline(DiffusionPipeline):
 
         valid_mask = (1 - pred_mask) > 0.5
         
-        final_pred, scale, shift = align_depth_least_square(
-                                                        gt_arr=base_pred,
-                                                        pred_arr=final_pred,
-                                                        valid_mask_arr=valid_mask,
-                                                        return_scale_shift=True,
-                                                        max_resolution=None,
-                                                )
-        
+        # final_pred, scale, shift = align_depth_least_square(
+        #                                                 gt_arr=base_pred,
+        #                                                 pred_arr=final_pred,
+        #                                                 valid_mask_arr=valid_mask,
+        #                                                 return_scale_shift=True,
+        #                                                 max_resolution=None,
+        #                                         )
+        final_pred = final_pred * (normalize_obj['max'].item() - normalize_obj['min'].item()) + normalize_obj['min'].item()
+
         initial_pred, scale, shift = align_depth_least_square(
                                                         gt_arr=base_pred,
                                                         pred_arr=initial_pred,

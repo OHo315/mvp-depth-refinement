@@ -13,11 +13,11 @@ gradient_accumulation_steps=$((macrobatch_size / num_gpus))
     # --student_ckpt_dir_revision depth_anything_small_run \
     # --student_ckpt_dir_revision blurred \
 accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
-    --sds_loss_weight 1.0 \
+    --sds_loss_weight 0.0 \
     --depth_weight 0.4 \
     --base_ckpt_dir andrew-healey/sharpdepth \
     --student_ckpt_dir andrew-healey/sharpdepth \
-    --student_ckpt_dir_revision identity_blur_2 \
+    --student_ckpt_dir_revision identity_experiment_7500 \
     --add_datetime_prefix \
     --report_to wandb \
     --mixed_precision bf16 \
@@ -27,7 +27,7 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --lr_scheduler cosine \
     --lr_warmup_steps 100 \
     --tracker_project_name ppd_sharpdepth_train \
-    --wandb_name "identity_blur_2_resume" \
+    --wandb_name "identityno_sds" \
     --set_grads_to_none \
     --checkpointing_steps 500 \
     --validation_steps 200 \
@@ -42,6 +42,6 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --denoiser pixel_perfect_depth \
     --use_conditioning_probability 0.8 \
     --dit_patch_encoder_lr_multiplier 0.1 \
-    --blur_unidepth_output_ratio 2 \
+    --blur_unidepth_output_ratio 1 \
     --noise_aware_latent_noise_scale 0.0 \
     "$@"

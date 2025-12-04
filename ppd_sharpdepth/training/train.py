@@ -1235,7 +1235,7 @@ if "__main__" == __name__:
                         l1_error = l1_error.clip(0, 1)
                         l1_mask = l1_error
                         
-                        timestep = unwrapped_student_denoiser.sampling_timesteps[random.randrange(0, len(unwrapped_student_denoiser.sampling_timesteps) - 1)]
+                        timestep = unwrapped_student_denoiser.sampling_timesteps[random.randrange(2, len(unwrapped_student_denoiser.sampling_timesteps))]
 
                         should_use_conditioning = torch.rand(1).item() < args.use_conditioning_probability
                         if should_use_conditioning:
@@ -1276,7 +1276,7 @@ if "__main__" == __name__:
                     sds_loss = 0.5 * F.mse_loss(student_pred_depth_latent, (student_pred_depth_latent - score_vector).detach(), reduction="mean")
 
                     depth_loss = l1_loss(
-                        maybe_blur(student_pred_depth_latent + 0.5), maybe_blur(x0 + 0.5), l1_error
+                        maybe_blur(student_pred_depth_latent + 0.5), maybe_blur(x0 + 0.5), torch.ones_like(l1_error)
                     )
                     depth_mse = F.mse_loss(student_pred_depth_latent + 0.5, x0 + 0.5, reduction="mean")
 
@@ -1326,7 +1326,7 @@ if "__main__" == __name__:
                             frozen_pred_depth_aligned = torch.from_numpy(frozen_pred_depth_aligned).to(device)
 
                             initial_depth_loss = l1_loss(
-                                maybe_blur(frozen_pred_depth_aligned), maybe_blur(x0 + 0.5), l1_error
+                                maybe_blur(frozen_pred_depth_aligned), maybe_blur(x0 + 0.5), torch.ones_like(l1_error)
                             )
                             initial_depth_mse = F.mse_loss(frozen_pred_depth_aligned, x0 + 0.5, reduction="mean")
 
@@ -1428,6 +1428,8 @@ if "__main__" == __name__:
                                 default_denoising_steps=default_denoising_steps,
                                 sharpdepth_kind=sharpdepth_kind,
                                 base_depth_estimator_fn=base_depth_estimator_fn,
+                                blur_difference_map_scale_factor=args.blur_unidepth_output_ratio,
+                                noise_aware_latent_noise_scale=args.noise_aware_latent_noise_scale,
                             ).to(accelerator.device, dtype=weight_dtype)
                             avg_rmse = 0.0
                             avg_rmse_base = 0.0
