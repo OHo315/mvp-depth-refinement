@@ -1,7 +1,10 @@
 import random
 
-INPUT_FILE = "data_split/kitti_depth/eigen_test_files_with_gt_filtered.txt"
-OUTPUT_FILE = "data_split/kitti_depth/eigen_test_files_with_gt_filtered_smaller.txt"
+#INPUT_FILE = "data_split/kitti_depth/eigen_test_files_with_gt_filtered.txt"
+#OUTPUT_FILE = "data_split/kitti_depth/eigen_test_files_with_gt_filtered_smaller.txt"
+INPUT_FILE = "data_split/nyu_depth/labeled/filename_list_test.txt"
+OUTPUT_FILE = "data_split/nyu_depth/labeled/filename_list_test_smaller.txt"
+
 NUM_LINES = 150
 
 SEED = 42

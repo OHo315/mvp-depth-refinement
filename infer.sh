@@ -19,13 +19,13 @@
 
 #python -m ppd_sharpdepth.infer \
 #	--checkpoint "lpiccinelli/unidepth-v1-vitl14" \
-#	--dataset_config_path config/dataset_depth/data_kitti_eigen_test.yaml \
+#	--dataset_config_path config/dataset_depth/data_nyu_test.yaml \
 #	--model_architecture unidepth
 
 python -m ppd_sharpdepth.infer \
 	--checkpoint "andrew-healey/sharpdepth" \
-	--dataset_config_path config/dataset_depth/data_kitti_eigen_test.yaml \
-	--model_architecture pixelperfectdepth
+	--dataset_config_path config/dataset_depth/data_nyu_test.yaml \
+	--model_architecture sharpdepth_ppd_unidepth
 
 
 

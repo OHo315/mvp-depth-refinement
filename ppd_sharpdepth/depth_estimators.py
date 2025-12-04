@@ -94,8 +94,8 @@ def get_depth_estimator_fn(
                 sharpdepth_kind=SharpDepthKind.LOTUS, 
                 base_depth_estimator_fn=base_depth_estimator_fn,
                 default_processing_resolution=768, 
-                default_denoising_steps=1
-            )
+                default_denoising_steps=1,
+             )
             assert pipeline.default_processing_resolution == 768, f"default_processing_resolution = {pipeline.default_processing_resolution}, expected 768"
             assert pipeline.default_denoising_steps == 1, f"default_denoising_steps = {pipeline.default_denoising_steps}, expected 1"
 
@@ -126,14 +126,13 @@ def get_depth_estimator_fn(
                 UNIDEPTH_CHECKPOINT_DIR
             )
 
-            frozen_unet = PixelPerfectDepth.from_pretrained("andrew-healey/sharpdepth", subfolder="ppd", revision="unidepth_partial")
+            frozen_unet = PixelPerfectDepth.from_pretrained("andrew-healey/sharpdepth", subfolder="ppd", revision="blurred")
             frozen_unet = frozen_unet.to(device, dtype=float_dtype).eval()
             frozen_unet.requires_grad_(False)
 
-            student_unet = PixelPerfectDepth.from_pretrained("andrew-healey/sharpdepth", subfolder="ppd_student", revision="unidepth_partial")
+            student_unet = PixelPerfectDepth.from_pretrained("andrew-healey/sharpdepth", subfolder="ppd_student", revision="blurred")
             student_unet = student_unet.to(device, dtype=float_dtype).eval()
             student_unet.requires_grad_(False)
-
 
             pipeline = SharpDepthPipeline.from_pretrained(
                 checkpoint_filepath, 
@@ -142,7 +141,9 @@ def get_depth_estimator_fn(
                 default_processing_resolution=768, 
                 default_denoising_steps=1,
                 frozen_unet=frozen_unet,
-                unet=student_unet
+                unet=student_unet,
+                blur_difference_map_scale_factor=32, 
+                noise_aware_latent_noise_scale=0.25
             )
             assert pipeline.default_processing_resolution == 768, f"default_processing_resolution = {pipeline.default_processing_resolution}, expected 768"
             assert pipeline.default_denoising_steps == 1, f"default_denoising_steps = {pipeline.default_denoising_steps}, expected 1"
@@ -168,17 +169,15 @@ def get_depth_estimator_fn(
             @torch.autocast(device_type=device.type, dtype=float_dtype)
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
                 
-                rgb_float_1chw_resized, _, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
+                rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
 
                 base_pred = unidepth.infer(
                     (rgb_float_1chw_resized * 255).squeeze().int()
                 )["depth"]
 
                 image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
-                # Rescale to original resolution.
+                base_pred = image_processor.unpad_image(base_pred, padding)  # [N*E,1,PH,PW]
                 base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
-
-                # Convert to numpy
                 base_pred = base_pred.squeeze().float().cpu().numpy()
 
                 ret_11hw = torch.from_numpy(base_pred)
@@ -284,7 +283,7 @@ def get_depth_estimator_fn(
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
                 preprocessor = PixelPerfectDepthPreProcessor
  
-                rgb_float_1chw_resized, *_ = preprocessor.run(rgb_int_1chw, device, float_dtype)
+                rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
                 rgb_int_1chw_resized = (rgb_float_1chw_resized * 255).to(torch.int32)
 
                 metric_depth_base = depth_anything_small_fn(rgb_int_1chw, preprocessor)
@@ -314,7 +313,20 @@ def get_depth_estimator_fn(
                 )
                 depth_11hw_aligned = torch.from_numpy(depth_11hw_aligned).to(device)
 
-                return torch.exp(depth_11hw_aligned) - 1
+                depth_11hw_aligned = torch.exp(depth_11hw_aligned) - 1
+
+                # Rescale
+
+                image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
+                base_pred = image_processor.unpad_image(depth_11hw_aligned, padding)  # [N*E,1,PH,PW]
+                base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+                base_pred = base_pred.squeeze().float().cpu().numpy()
+
+                ret_11hw = torch.from_numpy(base_pred)
+
+                return ret_11hw
+
+
 
                 # sanity check (passes!)
                 # Input to pixel perfect depth. shape: (804, 848, 3), std: 82.61926369403086, mean: 88.29934251697487, dtype: uint8
