@@ -1209,7 +1209,7 @@ if "__main__" == __name__:
                             latent = noise
                             for timestep in unwrapped_student_denoiser.sampling_timesteps:
                                 input = torch.cat([latent, cond], dim=1)
-                                pred = frozen_denoiser(x=input, semantics=semantics, timestep=timestep)
+                                pred = student_denoiser(x=input, semantics=semantics, timestep=timestep)
                                 latent = unwrapped_student_denoiser.sampler.step(pred=pred, x_t=latent, t=timestep)
                             frozen_pred_depth = latent + 0.5
                     
@@ -1244,7 +1244,7 @@ if "__main__" == __name__:
                             noisy_depth_cond = (norm_base_depth - 0.5) * (1 - scaled_l1_mask) + (torch.randn_like(x0) * scaled_l1_mask)
                             xT = torch.randn_like(latent)
 
-                            xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
+                            xt = unwrapped_student_denoiser.schedule.forward(frozen_pred_depth - 0.5, xT, timestep)
 
                             student_input = torch.cat([xt, cond, maybe_blur(noisy_depth_cond)], dim=1)
                         else:
