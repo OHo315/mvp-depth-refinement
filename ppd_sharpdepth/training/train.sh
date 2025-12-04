@@ -26,7 +26,7 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --lr_scheduler cosine \
     --lr_warmup_steps 100 \
     --tracker_project_name ppd_sharpdepth_train \
-    --wandb_name "lr=1e-5" \
+    --wandb_name "lr=1e-5_blurred" \
     --set_grads_to_none \
     --checkpointing_steps 500 \
     --validation_steps 200 \
