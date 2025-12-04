@@ -1,3 +1,2 @@
-,Unnamed: 0,id,model_architecture,preds_dataset,run_message,abs_rel,rmse,dbe
-0,0.0,0,unidepth,nyu_v2_processed,test,0.0337923414347174,0.1890767305345997,0.0124723523877053
-0,,1,unidepth,nyu_v2_processed,test2,0.033792341434717495,0.18907673053459975,0.012472352387705382
+,Unnamed: 0.2,Unnamed: 0.1,Unnamed: 0,id,gitname,model_architecture,preds_dataset,run_message,abs_rel,rmse,dbe
+0,,,,0,anthonyceponis,unidepth,nyu_v2_processed,test,0.033792341434717495,0.18907673053459975,0.012472352387705382

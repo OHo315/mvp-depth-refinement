@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from pprint import pprint
+import subprocess
 
 from ppd_sharpdepth.depth_estimators import ModelArchitecture 
 from script.evaluation.metrics import abs_rel, rmse, dbe_completeness
@@ -69,11 +70,13 @@ if __name__ == "__main__":
         total_rmse += rmse(depth_pred, depth_raw, valid_mask)
         total_dbe += dbe_completeness(depth_pred, depth_raw, valid_mask) # TODO: Add support for dbe valid mask.
 
+    gitname = subprocess.check_output(["git", "config", "user.name"]).decode().strip()
     
     # Update tracker.
     df = pd.read_csv(results_filepath)
     metrics = {
-        "id": len(df),
+        "id": len(df[df["gitname"] == gitname]),
+        "gitname": gitname,
         "model_architecture": model_architecture.value,
         "preds_dataset": cfg_data.dir,
         "run_message": run_message,
