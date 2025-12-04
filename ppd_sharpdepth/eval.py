@@ -24,7 +24,6 @@ if __name__ == "__main__":
 
     dataset_config_path = args.dataset_config_path
     model_architecture = ModelArchitecture(args.model_architecture)
-    half_precision = True # TODO: Add it as an argument.
     
     BASE_DATA_DIR = Path(os.environ["BASE_DATA_DIR"])
     BASE_PREDS_DIR = Path(os.environ["BASE_PREDS_DIR"])
@@ -36,26 +35,8 @@ if __name__ == "__main__":
     )
 
     dataloader = DataLoader(dataset, batch_size=1, num_workers=0)
-    model_architecture = ModelArchitecture(model_architecture)
-    
-    # Device
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    else:
-        device = torch.device("cpu")
-        print("WARNING: cuda not available. Running on cpu will be slow.")
-    print(f"device = {device}")
-
-
-    # Precision
-    if half_precision:
-        dtype = torch.float16
-        variant = "fp16"
-        print(f"WARNING: Running with half precision ({dtype}), might lead to suboptimal result.")
-    else:
-        dtype = torch.float32
-        variant = None
-
+    model_architecture = ModelArchitecture(model_architecture) 
+ 
     total_abs_rel = 0.0
     total_rmse = 0.0
     total_dbe = 0.0
@@ -70,7 +51,7 @@ if __name__ == "__main__":
         valid_mask = valid_mask_ts.numpy()
 
         pred_path = BASE_PREDS_DIR / cfg_data.dir / model_architecture.value / (rgb_name + ".npy")
-        depth_pred = np.load(pred_path).astype(np.float32)
+        depth_pred = np.load(str(pred_path)).astype(np.float32)
 
         # Clip to dataset min max
         depth_pred = np.clip(

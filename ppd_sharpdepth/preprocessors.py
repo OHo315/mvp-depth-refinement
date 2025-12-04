@@ -48,6 +48,7 @@ class PixelPerfectDepthPreProcessor(PreProcessor):
         rgb_float_1chw = rgb_int_1chw.to(float_dtype) / 255.0
         rgb_float_hwc = rgb_float_1chw.squeeze(0).permute(1, 2, 0).cpu().float().numpy()
         resized_rgb_float_HpWpC = resize_keep_aspect(rgb_float_hwc)
+        print("PPD PRE PROCESSOR", rgb_int_1chw.shape, rgb_float_hwc.shape, resized_rgb_float_HpWpC.shape)
         hp, wp, _ = resized_rgb_float_HpWpC.shape
         rgb_float_1chw_resized = torch.from_numpy(resized_rgb_float_HpWpC).permute(2, 0, 1).unsqueeze(0).to(device=device, dtype=rgb_float_1chw.dtype)
 

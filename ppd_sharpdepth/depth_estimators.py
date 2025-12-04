@@ -20,6 +20,7 @@ from .depth_anything.dpt import DepthAnything
 from .depth_anything.util.transform import Resize, NormalizeImage, PrepareForNet
 from torchvision.transforms import Compose
 import cv2
+from diffusers.pipelines.marigold.marigold_image_processing import MarigoldImageProcessor
 
 from huggingface_hub import hf_hub_download
 from ppd_sharpdepth.ppd.models.ppd import PixelPerfectDepth
@@ -116,19 +117,32 @@ def get_depth_estimator_fn(
 
         case ModelArchitecture.sharpdepth_ppd_unidepth:
 
-            DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR="LiheYoung/depth_anything_vits14"
+            #with torch.autocast(device_type="cuda", dtype=torch.bfloat16): 
+            UNIDEPTH_CHECKPOINT_DIR="lpiccinelli/unidepth-v1-vitl14"
             base_depth_estimator_fn = get_depth_estimator_fn(
-                ModelArchitecture.depthanythingsmall, 
-                device, float_dtype, 
-                DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR
+                ModelArchitecture.unidepth, 
+                device, 
+                float_dtype, 
+                UNIDEPTH_CHECKPOINT_DIR
             )
+
+            frozen_unet = PixelPerfectDepth.from_pretrained("andrew-healey/sharpdepth", subfolder="ppd", revision="unidepth_partial")
+            frozen_unet = frozen_unet.to(device, dtype=float_dtype).eval()
+            frozen_unet.requires_grad_(False)
+
+            student_unet = PixelPerfectDepth.from_pretrained("andrew-healey/sharpdepth", subfolder="ppd_student", revision="unidepth_partial")
+            student_unet = student_unet.to(device, dtype=float_dtype).eval()
+            student_unet.requires_grad_(False)
+
 
             pipeline = SharpDepthPipeline.from_pretrained(
                 checkpoint_filepath, 
-                sharpdepth_kind=SharpDepthKind.PPD, 
+                sharpdepth_kind=SharpDepthKind.PIXEL_PERFECT_DEPTH, 
                 base_depth_estimator_fn=base_depth_estimator_fn,
                 default_processing_resolution=768, 
-                default_denoising_steps=1
+                default_denoising_steps=1,
+                frozen_unet=frozen_unet,
+                unet=student_unet
             )
             assert pipeline.default_processing_resolution == 768, f"default_processing_resolution = {pipeline.default_processing_resolution}, expected 768"
             assert pipeline.default_denoising_steps == 1, f"default_denoising_steps = {pipeline.default_denoising_steps}, expected 1"
@@ -137,6 +151,7 @@ def get_depth_estimator_fn(
 
             @torch.autocast(device_type=device.type, dtype=float_dtype)
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
+                #with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 out = pipeline(rgb_int_1chw)
 
                 h, w = out.depth_np.shape
@@ -153,11 +168,21 @@ def get_depth_estimator_fn(
             @torch.autocast(device_type=device.type, dtype=float_dtype)
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
                 
-                rgb_float_1chw_resized, *_ = preprocessor.run(rgb_int_1chw, device, float_dtype)
+                rgb_float_1chw_resized, _, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
 
-                ret_11hw = unidepth.infer(
+                base_pred = unidepth.infer(
                     (rgb_float_1chw_resized * 255).squeeze().int()
                 )["depth"]
+
+                image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
+                # Rescale to original resolution.
+                base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+
+                # Convert to numpy
+                base_pred = base_pred.squeeze().float().cpu().numpy()
+
+                ret_11hw = torch.from_numpy(base_pred)
+
                 return ret_11hw
 
                 # sanity check, for reference:
@@ -257,11 +282,12 @@ def get_depth_estimator_fn(
 
             @torch.autocast(device_type=device.type, dtype=float_dtype)
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
+                preprocessor = PixelPerfectDepthPreProcessor
  
                 rgb_float_1chw_resized, *_ = preprocessor.run(rgb_int_1chw, device, float_dtype)
                 rgb_int_1chw_resized = (rgb_float_1chw_resized * 255).to(torch.int32)
 
-                metric_depth_base = depth_anything_small_fn(rgb_int_1chw_resized)
+                metric_depth_base = depth_anything_small_fn(rgb_int_1chw, preprocessor)
 
                 H, W = rgb_float_1chw_resized.squeeze(0).shape[1:3]
                 raw_image_hwc = (
