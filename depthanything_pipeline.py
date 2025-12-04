@@ -37,9 +37,7 @@ from diffusers.pipelines.marigold.marigold_image_processing import MarigoldImage
 
 from ppd_sharpdepth.sharpdepth_kinds import SharpDepthKind
 
-from ppd_sharpdepth.preprocessors import PreProcessor, MarigoldPreProcessor, PixelPerfectDepthPreProcessor
-
-class SharpDepthOutput(BaseOutput):
+class DepthAnythingOutput(BaseOutput):
     """
     Output class for Marigold Monocular Depth Estimation pipeline.
 
@@ -60,7 +58,7 @@ class SharpDepthOutput(BaseOutput):
     depth_initial_colored: Union[None, np.ndarray]
     pred_mask: Union[None, Image.Image]
 
-class SharpDepthPipeline(DiffusionPipeline):
+class DepthAnythingPipeline(DiffusionPipeline):
     """
     Pipeline for Marigold Monocular Depth Estimation: https://marigoldcomputervision.github.io.
 
@@ -112,21 +110,9 @@ class SharpDepthPipeline(DiffusionPipeline):
         frozen_unet: Optional[Union[UNet2DConditionModel, PixelPerfectDepth]] = None,
         default_denoising_steps: Optional[int] = None,
         default_processing_resolution: Optional[int] = None,
-        sharpdepth_kind: Optional[SharpDepthKind] = None,
-        base_depth_estimator_fn=None,
     ):
         super().__init__()
-
-        if not frozen_unet:
-
-            if sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
-                raise ValueError("No frozen PPD denoiser provided. Bad news!")
-            elif sharpdepth_kind == SharpDepthKind.LOTUS:
-                print("\n"*20+"WARN: No frozen unet provided, using the student unet")
-                frozen_unet = frozen_unet or unet
-            else:
-                raise ValueError(f"Unknown sharpdepth_kind: {sharpdepth_kind}")
-
+ 
         self.register_modules(
             unet=unet,
             frozen_unet=frozen_unet,
@@ -150,16 +136,12 @@ class SharpDepthPipeline(DiffusionPipeline):
         self.depth_normalizer = ScaleShiftNormalizer()
         self.image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
 
-        assert sharpdepth_kind is not None, "must pass sharpdepth_kind to SharpDepthPipeline"
-        self.sharpdepth_kind = sharpdepth_kind
-
-        assert base_depth_estimator_fn is not None, "must pass base_depth_estimator_fn to SharpDepthPipeline"
-        self.base_depth_estimator_fn = base_depth_estimator_fn
 
     @torch.no_grad()
     def __call__(
         self,
-        rgb_int_1chw: torch.Tensor,
+        input_image: Union[Image.Image, torch.Tensor],
+        base_depth_estimator_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
         intrinsics=None,
         denoising_steps: Optional[int] = None,
         processing_res: Optional[int] = None,
@@ -214,10 +196,6 @@ class SharpDepthPipeline(DiffusionPipeline):
             - **uncertainty** (`None` or `np.ndarray`) Uncalibrated uncertainty(MAD, median absolute deviation)
                     coming from ensembling. None if `ensemble_size = 1`
         """
-
-        assert isinstance(rgb_int_1chw, torch.Tensor), "rgb_int_1chw must be a torch.Tensor"
-        assert rgb_int_1chw.dtype == torch.int32, "rgb_int_1chw must be of dtype torch.int32"
-
         # Model-specific optimal default values leading to fast and reasonable results.
         if denoising_steps is None:
             denoising_steps = self.default_denoising_steps
@@ -227,108 +205,128 @@ class SharpDepthPipeline(DiffusionPipeline):
         assert processing_res >= 0
 
         self.encode_empty_text()
+        # ----------------- Image Preprocess -----------------
+        # Convert to torch tensor
+        if isinstance(input_image, Image.Image):
+            input_image = input_image.convert("RGB")
+            # convert to torch tensor [H, W, rgb] -> [rgb, H, W]
+            rgb_int_1chw = pil_to_tensor(input_image)
+            rgb_int_1chw = rgb_int_1chw.unsqueeze(0)  # [1, rgb, H, W], dtype int
+        elif isinstance(input_image, torch.Tensor):
+            rgb_int_1chw = input_image
+        else:
+            raise TypeError(f"Unknown input type: {type(input_image) = }")
         input_size = rgb_int_1chw.shape
         assert (
             4 == rgb_int_1chw.dim() and 3 == input_size[-3]
         ), f"Wrong input shape {input_size}, expected [1, rgb, H, W]"
 
-        if self.sharpdepth_kind == SharpDepthKind.LOTUS:
-            depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, MarigoldPreProcessor)
+        image, padding, original_resolution = self.image_processor.preprocess(rgb_int_1chw, processing_res, resample_method, self.device)  # [N,3,PPH,PPW]
+        # Resize image
 
-            rgb_float_1chw_resized, padding, original_resolution = MarigoldPreProcessor.run(rgb_int_1chw, self.device, self.dtype)
+        # Normalize rgb values
+        rgb_float_1chw = rgb_int_1chw.to(self.unet.dtype) / 255.0
+        rgb_float_hwc = rgb_float_1chw.squeeze(0).permute(1, 2, 0).cpu().float().numpy()
+        resized_rgb_float_HpWpC = resize_keep_aspect(rgb_float_hwc)
+        hp, wp, _ = resized_rgb_float_HpWpC.shape
+        rgb_float_1chw_resized = torch.from_numpy(resized_rgb_float_HpWpC).permute(2, 0, 1).unsqueeze(0).to(device=self.device, dtype=rgb_float_1chw.dtype)
+        rgb_float_1chw = rgb_float_1chw_resized
 
-            rgb_norm =  rgb_float_1chw_resized * 2.0 - 1.0  #  [0, 1] -> [-1, 1]
-            rgb_norm = rgb_norm.to(self.dtype).to(self.device)
+        #depth_base = depth_base_11hw = base_depth_estimator_fn(rgb_float_1chw_resized, rgb_float_1chw_resized)
 
-            normalize_obj = self.depth_normalizer(depth_base)
-            norm_disp_base = normalize_obj['norm_depth'].to(dtype=self.vae.dtype)
+        # TODO: Convert this into a pipeline.
+        depth_anything_small_fn = get_base_depth_estimator_fn(base_model="depth_anything_small", device=device, dtype=dtype)
 
-            base_latent = self.encode_rgb(norm_disp_base.to(self.vae.dtype).repeat(1,3,1,1))
-            rgb_latent = self.encode_rgb(rgb_norm.to(self.vae.dtype))
-            lotus_timesteps = torch.ones((rgb_latent.shape[0],), device=self.device) * (self.scheduler.config.num_train_timesteps - 1)
-            lotus_timesteps = lotus_timesteps.long()
+        model = PixelPerfectDepth.from_pretrained("andrew-healey/sharpdepth", subfolder="ppd")
+        model = model.to(device).eval()
+        model.requires_grad_(False)
 
-            lotus_input = torch.cat([rgb_latent.detach(), torch.randn_like(rgb_latent)], dim=1)  # this order is important
-            task_emb = torch.tensor([1, 0]).float().unsqueeze(0).repeat(1, 1)
-            task_emb = torch.cat([torch.sin(task_emb), torch.cos(task_emb)], dim=-1).to(self.device, self.dtype)
+        def base_depth_estimator_fn(marigold_preprocessed_image_1chw, raw_image_1chw):
 
-            lotus_pred  = self.unet(lotus_input, lotus_timesteps.to(self.vae.dtype), self.empty_text_embed, class_labels=task_emb).sample
+            metric_depth_base = depth_anything_small_fn(marigold_preprocessed_image_1chw, raw_image_1chw)
 
-            # decode pred_latent to depth
-            latent = lotus_pred / self.vae.config.scaling_factor
-            z = self.vae.post_quant_conv(latent.to(self.vae.dtype))
-            lotus_depth = self.vae.decoder(z).mean(dim=1, keepdim=True)
-            lotus_depth_initial = lotus_depth
-            
-            # compute difference mask
-            l1_error            = torch.abs(lotus_depth -  norm_disp_base)
-            l1_error            = l1_error/l1_error.max()
-            l1_error            = l1_error.clip(0, 1)
+            H, W = marigold_preprocessed_image_1chw.squeeze(0).shape[1:3]
+            raw_image_hwc = raw_image_1chw.squeeze(0).permute(1, 2, 0).float().cpu().numpy()
+            raw_image_hwc_bgr = cv2.cvtColor(raw_image_hwc, cv2.COLOR_RGB2BGR) # infer_image() applies a BGR->RGB conversion, so we must first convert from RGB->BGR here
+            depth_raw_11hw, _ = model.infer_image(raw_image_hwc_bgr)
+            depth_11hw = F.interpolate(depth_raw_11hw, size=(H, W), mode='bilinear', align_corners=False)
+
+            # depth_11hw is in log space
+            # so let's use least-squares to align as closely as possible with log-space metric_depth_base
+            # and then convert it to metric space!
+            metric_depth_base_log_space = torch.log(metric_depth_base + 1)
+            depth_11hw_aligned, _, _ = align_depth_least_square(
+                gt_arr=metric_depth_base_log_space.detach().float().cpu().numpy(),
+                pred_arr=depth_11hw.detach().float().cpu().numpy(),
+                valid_mask_arr=torch.ones_like(depth_11hw).bool().cpu().numpy(),
+                return_scale_shift=True,
+                max_resolution=None,
+            )
+            depth_11hw_aligned = torch.from_numpy(depth_11hw_aligned).to(device)
+
+            return torch.exp(depth_11hw_aligned) - 1
+
+            # sanity check (passes!)
+            # Input to pixel perfect depth. shape: (804, 848, 3), std: 82.61926369403086, mean: 88.29934251697487, dtype: uint8
+            # Output from pixel perfect depth. shape: (1, 1, 3, 804), std: 0.3026374280452728, mean: 0.4216078519821167, dtype: float32
+
+            # print(f"Input to pixel perfect depth. shape: {raw_image_hwc.shape}, std: {raw_image_hwc.std()}, mean: {raw_image_hwc.mean()}, dtype: {raw_image_hwc.dtype}")
+            # print(f"Resized output from pixel perfect depth. shape: {depth_11hw.shape}, std: {depth_11hw.std()}, mean: {depth_11hw.mean()}, dtype: {depth_11hw.dtype}")
+            # raise NotImplementedError("Pixel Perfect Depth is not implemented yet")
+
+
+        normalize_obj = self.depth_normalizer(torch.log(depth_base_11hw + 1))
+        norm_base_depth = normalize_obj["norm_depth"].to(dtype=self.unet.dtype)
+        norm_base_depth = norm_base_depth * 0.5 + 0.5
+
+        # initial PPD
+        cond = rgb_float_1chw - 0.5
+        noise = torch.randn(size=[cond.shape[0], 1, cond.shape[2], cond.shape[3]]).to(self.device)
+        with torch.autocast(self.device.type,dtype=self.unet.dtype):
+            semantics = self.frozen_unet.semantics_prompt(rgb_float_1chw)
+            latent = noise
+            for timestep in self.frozen_unet.sampling_timesteps:
+                input = torch.cat([latent, cond], dim=1)
+                pred = self.frozen_unet.dit(x=input, semantics=semantics, timestep=timestep)
+                latent = self.frozen_unet.sampler.step(pred=pred, x_t=latent, t=timestep)
+            frozen_pred_depth = latent + 0.5
+    
+        # compute difference mask
+        l1_error = torch.abs(frozen_pred_depth - norm_base_depth)
+        l1_error = l1_error / l1_error.max()
+        l1_error = l1_error.clip(0, 1)
+        l1_mask = l1_error
+
+        noisy_depth_cond = norm_base_depth * (1 - l1_mask) + (torch.randn_like(norm_base_depth) * l1_mask)
+
+        # second PPD
+        noise = torch.randn_like(noise)
+        with torch.autocast(self.device.type,dtype=self.unet.dtype):
+            latent = noise
+            for timestep in self.unet.sampling_timesteps:
+                student_input = torch.cat([latent, cond, noisy_depth_cond], dim=1)
+                pred = self.unet.dit(x=student_input, semantics=semantics, timestep=timestep)
+                latent = self.unet.sampler.step(pred=pred, x_t=latent, t=timestep)
+            student_pred_depth = latent + 0.5
         
-            latent_mask = torch.nn.functional.interpolate(l1_error, scale_factor=1/8)
+        # student_pred_depth is in log space
+        # so let's use least-squares to align as closely as possible with log-space depth_base
+        # and then convert it to metric space!
+        depth_base_11hw_log_space = torch.log(depth_base_11hw + 1)
+        student_pred_depth_aligned, _, _ = align_depth_least_square(
+            gt_arr=depth_base_11hw_log_space.detach().float().cpu().numpy(),
+            pred_arr=student_pred_depth.detach().float().cpu().numpy(),
+            valid_mask_arr=torch.ones_like(student_pred_depth).bool().cpu().numpy(),
+            return_scale_shift=True,
+            max_resolution=None,
+        )
+        student_pred_depth_aligned = torch.from_numpy(student_pred_depth_aligned).to(self.device)
+        student_pred_depth = torch.exp(student_pred_depth_aligned) - 1
 
-            noise                   = torch.randn_like(base_latent).to(self.vae.device)
-            noisy_lotus_latent      = self.scheduler.add_noise(lotus_pred, noise, lotus_timesteps) # noisy_lotus_latent ~= noise
-            noisy_latent            = noisy_lotus_latent * latent_mask + base_latent * (1 - latent_mask) # noisy_latent ~= noise
-            student_input           = torch.cat([rgb_latent, noisy_latent], dim=1)
-
-            pred_latent     = self.unet(student_input, lotus_timesteps.to(self.vae.dtype), encoder_hidden_states=self.empty_text_embed, class_labels=task_emb).sample
-
-            # decode pred_latent to depth
-            latent = pred_latent / self.vae.config.scaling_factor
-            z = self.vae.post_quant_conv(latent.to(self.vae.dtype))
-            lotus_depth = self.vae.decoder(z).mean(dim=1, keepdim=True)
-
-            student_pred_depth = lotus_depth
-            depth_base_11hw = depth_base
-            initial_pred = lotus_depth_initial
-            l1_error = l1_error
-        elif self.sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH: 
-            depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, PixelPerfectDepthPreProcessor)
-            rgb_float_1chw_resized, padding, original_resolution = PixelPerfectDepthPreProcessor.run(rgb_int_1chw, self.device, self.dtype)
-
-            normalize_obj = self.depth_normalizer(depth_base_11hw)
-            norm_base_depth = normalize_obj["norm_depth"].to(dtype=self.unet.dtype)
-            norm_base_depth = norm_base_depth * 0.5 + 0.5
-
-            # initial PPD
-            cond = rgb_float_1chw_resized - 0.5
-            noise = torch.randn(size=[cond.shape[0], 1, cond.shape[2], cond.shape[3]]).to(self.device)
-            with torch.autocast(self.device.type,dtype=self.unet.dtype):
-                semantics = self.frozen_unet.semantics_prompt(rgb_float_1chw_resized)
-                latent = noise
-                for timestep in self.frozen_unet.sampling_timesteps:
-                    input = torch.cat([latent, cond], dim=1)
-                    pred = self.frozen_unet.dit(x=input, semantics=semantics, timestep=timestep)
-                    latent = self.frozen_unet.sampler.step(pred=pred, x_t=latent, t=timestep)
-                initial_pred = frozen_pred_depth = latent + 0.5
-        
-            # compute difference mask
-            l1_error = torch.abs(frozen_pred_depth - norm_base_depth)
-            l1_error = l1_error / l1_error.max()
-            l1_error = l1_error.clip(0, 1)
-            l1_mask = l1_error
-
-            noisy_depth_cond = norm_base_depth * (1 - l1_mask) + (torch.randn_like(norm_base_depth) * l1_mask)
-
-            # second PPD
-            noise = torch.randn_like(noise)
-            with torch.autocast(self.device.type,dtype=self.unet.dtype):
-                latent = noise
-                for timestep in self.unet.sampling_timesteps:
-                    student_input = torch.cat([latent, cond, noisy_depth_cond], dim=1)
-                    pred = self.unet.dit(x=student_input, semantics=semantics, timestep=timestep)
-                    latent = self.unet.sampler.step(pred=pred, x_t=latent, t=timestep)
-                student_pred_depth = latent + 0.5
-            
-        else:
-            raise NotImplementedError(f"SharpDepthKind {self.sharpdepth_kind} not implemented yet")
-
-        
-        final_pred = self.image_processor.unpad_image(student_pred_depth, padding)  # [N*E,1,PH,PW]
-        base_pred = self.image_processor.unpad_image(depth_base_11hw, padding)  # [N*E,1,PH,PW]
-        initial_pred = self.image_processor.unpad_image(initial_pred, padding)  # [N*E,1,PH,PW]
-        l1_error = self.image_processor.unpad_image(l1_error, padding)  # [N*E,1,PH,PW]
+        final_pred = student_pred_depth
+        base_pred = depth_base_11hw
+        initial_pred = frozen_pred_depth
+        l1_error = l1_error
         
         final_pred = self.image_processor.resize_antialias(final_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
         base_pred = self.image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]

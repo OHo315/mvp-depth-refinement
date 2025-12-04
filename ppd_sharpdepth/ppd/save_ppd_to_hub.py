@@ -1,13 +1,17 @@
+from huggingface_hub import create_branch, delete_folder, upload_folder
+
+
 if __name__ == "__main__":
+    import sys
+    print(f"sys.argv: {sys.argv}")
 
     from huggingface_hub import hf_hub_download
     import torch
     from ppd_sharpdepth.ppd.models.ppd import PixelPerfectDepth
-    import sys
 
     device = torch.device('cuda')
 
-    if sys.argv[-1] == "push":
+    if sys.argv[1] == "push":
         print("Pushing Pixel Perfect Depth to Hugging Face Hub")
 
         ckpt_path = hf_hub_download(repo_id="gangweix/pixel-perfect-depth", filename="ppd.pth")
@@ -42,10 +46,20 @@ if __name__ == "__main__":
 
         multi_channel_model.push_to_hub("andrew-healey/sharpdepth", subfolder="ppd_student")
 
-    elif sys.argv[-1] == "pull":
+    elif sys.argv[1] == "pull":
         print("Pulling Pixel Perfect Depth from Hugging Face Hub")
         model = PixelPerfectDepth.from_pretrained("andrew-healey/sharpdepth", subfolder="ppd")
         model = PixelPerfectDepth.from_pretrained("andrew-healey/pixel-perfect-depth")
         print("Pulled!")
+    elif sys.argv[1] == "push_trained_checkpoint":
+        branch_name = sys.argv[2]
+        local_folder_name = sys.argv[3]
+        print(f"Pushing trained checkpoint in local folder {local_folder_name} to remote ppd_student/ subfolder in a new branch {branch_name} of andrew-healey/sharpdepth")
+        input("Press Enter to continue: ")
+
+        branch = create_branch(repo_id="andrew-healey/sharpdepth", branch=branch_name,revision="main")
+        # rm -rf ppd_student on the branch
+        delete_folder(repo_id="andrew-healey/sharpdepth", path_in_repo="ppd_student", revision=branch_name)
+        upload_folder(repo_id="andrew-healey/sharpdepth", folder_path=local_folder_name, path_in_repo="ppd_student", revision=branch_name)
     else:
-        raise ValueError(f"Invalid command: {sys.argv[-1]}")
+        raise ValueError(f"Invalid command: {sys.argv[1]}")

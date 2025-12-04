@@ -11,6 +11,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 import debugpy
+from diffusers.pipelines.marigold.marigold_image_processing import MarigoldImageProcessor
+from ppd_sharpdepth.depth_estimators import ModelArchitecture, get_depth_estimator_fn
+from ppd_sharpdepth.preprocessors import MarigoldPreProcessor, PixelPerfectDepthPreProcessor
 from ppd_sharpdepth.sharpdepth.util.alignment import align_depth_least_square
 
 import subprocess
@@ -60,6 +63,8 @@ from ppd_sharpdepth.sharpdepth.util.config_util import find_value_in_omegaconf, 
 from ppd_sharpdepth.sharpdepth.util.logging_util import config_logging
 from ppd_sharpdepth.sharpdepth.util.normalizer import ScaleShiftNormalizer
 from ppd_sharpdepth.ppd.models.ppd import PixelPerfectDepth
+
+import torchvision.transforms.functional as TV_F
 
 import wandb
 
@@ -216,6 +221,7 @@ if "__main__" == __name__:
         default="prs-eth/marigold-v1-0",
         help="directory of pretrained checkpoint",
     )
+    parser.add_argument("--student_ckpt_dir_revision", type=str, default=None, help="Revision of the student checkpoint HF Hub model")
     parser.add_argument(
         "--add_datetime_prefix",
         action="store_true",
@@ -391,6 +397,8 @@ if "__main__" == __name__:
     parser.add_argument("--compute_initial_depth_loss_probability", type=float, default=1.0, help="Probability of computing the initial depth loss")
     parser.add_argument("--dit_patch_encoder_lr_multiplier", type=float, default=0.01, help="Multiplier for the learning rate of the DiT patch encoder")
     parser.add_argument("--sds_loss_weight", type=float, default=1.0, help="Weight for the SDS loss")
+    parser.add_argument("--blur_unidepth_output_ratio", type=int, default=1, help="Ratio of downscaling the unidepth output, for guidance, l1 error, and depth loss computation")
+    parser.add_argument("--noise_aware_latent_noise_scale", type=float, default=1.0, help="Scale for the noise aware latent noise. 0 means no noise, 1 means default behavior.")
 
     args = parser.parse_args()
 
@@ -404,6 +412,7 @@ if "__main__" == __name__:
         args.base_ckpt_dir if args.base_ckpt_dir is not None else os.environ["BASE_CKPT_DIR"]
     )
     student_ckpt_dir = args.student_ckpt_dir
+    student_ckpt_dir_revision = args.student_ckpt_dir_revision
 
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
@@ -433,7 +442,7 @@ if "__main__" == __name__:
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
         log_with=args.report_to,
-        project_config=accelerator_project_config,
+        project_config=accelerator_project_config
     )
     logger.info(accelerator.state, main_process_only=False)
     if accelerator.is_local_main_process:
@@ -479,7 +488,7 @@ if "__main__" == __name__:
 
             for model in models:
                 sub_dir = (
-                    "unet"
+                    (denoiser_subfolder if model == unwrap_model(student_denoiser) else frozen_denoiser_subfolder)
                     if isinstance(model, type(unwrap_model(student_denoiser)))
                     else "text_encoder"
                 )
@@ -639,11 +648,16 @@ if "__main__" == __name__:
     text_encoder.requires_grad_(False)
 
     student_denoiser = denoiser_cls.from_pretrained(
-        student_ckpt_dir, subfolder=denoiser_subfolder, revision=None
+        student_ckpt_dir, subfolder=denoiser_subfolder, revision=student_ckpt_dir_revision
     )
     student_denoiser.requires_grad_(True)
     if sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
         student_denoiser.semantics_encoder.requires_grad_(False)
+    
+    def disable_dropout(model):
+        for module in model.modules():
+            if isinstance(module, nn.Dropout):
+                module.p = 0
 
     # ---------------------------------------------------------------------
 
@@ -748,7 +762,7 @@ if "__main__" == __name__:
     # -------------------- Set up training step and LR scheduler --------------------
     # Scheduler and math around the numfprobfber of training steps.
     overrode_max_train_steps = False
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / (args.gradient_accumulation_steps * accelerator.num_processes)) # we multiply by num_processes b/c train_dataloader has not yet been sharded
     if args.max_train_steps is None:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
@@ -756,10 +770,10 @@ if "__main__" == __name__:
     lr_scheduler = get_scheduler(
         args.lr_scheduler,
         optimizer=optimizer,
-        num_warmup_steps=args.lr_warmup_steps * accelerator.num_processes,
-        num_training_steps=args.max_train_steps * accelerator.num_processes,
+        num_warmup_steps=args.lr_warmup_steps,
+        num_training_steps=args.max_train_steps,
         num_cycles=args.lr_num_cycles,
-        power=args.lr_power,
+        power=args.lr_power
     )
     # ---------------------------------------------------------------------
 
@@ -767,6 +781,7 @@ if "__main__" == __name__:
     student_denoiser, frozen_denoiser, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         student_denoiser, frozen_denoiser, optimizer, train_dataloader, lr_scheduler
     )
+    lr_scheduler.split_batches = True
 
     unwrapped_frozen_denoiser = unwrap_model(frozen_denoiser)
     unwrapped_student_denoiser = unwrap_model(student_denoiser)
@@ -788,7 +803,23 @@ if "__main__" == __name__:
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     student_denoiser.to(accelerator.device, dtype=weight_dtype)
 
-    base_depth_estimator_fn = get_base_depth_estimator_fn(args.base_model, accelerator.device, torch.float32)
+    model_architecture = ModelArchitecture(args.base_model)
+
+    def get_checkpoint_from_model_architecture(model_architecture: ModelArchitecture) -> str:
+        match model_architecture:
+            case ModelArchitecture.unidepth:
+                return "lpiccinelli/unidepth-v1-vitl14"
+            case ModelArchitecture.depthanythingsmall:
+                return "LiheYoung/depth_anything_vits14"
+            case ModelArchitecture.depthanythinglarge:
+                return "LiheYoung/depth_anything_vitl14"
+            case ModelArchitecture.pixelperfectdepth:
+                return "andrew-healey/sharpdepth"
+            case _:
+                raise ValueError(f"Invalid model architecture: {model_architecture}")
+
+    base_model_checkpoint = get_checkpoint_from_model_architecture(model_architecture)
+    base_depth_estimator_fn = get_depth_estimator_fn(model_architecture, accelerator.device, torch.bfloat16, base_model_checkpoint)
 
 
     if args.use_ema:
@@ -939,7 +970,7 @@ if "__main__" == __name__:
     # and when it is, it might appear more times in one batch than another
 
     conditioning_kinds = ["no_cond","cond", "all"]
-    loss_keys = ["total","sds","depth","initial_depth"]
+    loss_keys = ["total","sds","depth","initial_depth","depth_mse","initial_depth_mse","depth_aligned_mse"]
 
     # initialize EMA buffers at 0
     loss_exponential_moving_averages = { conditioning_kind: { loss_key: 0.0 for loss_key in loss_keys } for conditioning_kind in conditioning_kinds }
@@ -959,8 +990,13 @@ if "__main__" == __name__:
     last_loss_accum = torch.tensor(0.0, device=device, dtype=torch.float32)
 
     for epoch in range(first_epoch, args.num_train_epochs):
+
+        curr_train_dataloader = train_dataloader
+        if epoch == first_epoch and global_step > epoch * num_update_steps_per_epoch and global_step < (epoch + 1) * num_update_steps_per_epoch:
+            curr_train_dataloader = accelerator.skip_first_batches(train_dataloader, (global_step - epoch * num_update_steps_per_epoch) * accelerator.gradient_accumulation_steps)
+
         student_denoiser.train()
-        for step, (batch, row_idx) in enumerate(train_dataloader):
+        for step, (batch, row_idx) in enumerate(curr_train_dataloader):
             with accelerator.accumulate(student_denoiser):
                 og_batch = batch
 
@@ -978,43 +1014,17 @@ if "__main__" == __name__:
 
                 rgb = batch["rgb_int"].to(weight_dtype) / 255.0
 
-                if sharpdepth_kind == SharpDepthKind.LOTUS:
-                    # don't resize
-                    pass
-                elif sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
-
-                    rgb_float_hwc = rgb.squeeze(0).permute(1, 2, 0).cpu().float().numpy()
-                    resized_rgb_float_HpWpC = resize_keep_aspect(rgb_float_hwc)
-                    hp, wp, _ = resized_rgb_float_HpWpC.shape
-                    rgb_float_1chw_resized = torch.from_numpy(resized_rgb_float_HpWpC).permute(2, 0, 1).unsqueeze(0).to(device=rgb.device, dtype=rgb.dtype)
-                    rgb_int_1chw_resized = (rgb_float_1chw_resized * 255.0).to(batch["rgb_int"].dtype)
-
-#                    depth_raw_linear_11hw = batch["depth_raw_linear"]
-#                    depth_raw_linear_hw1 = batch["depth_raw_linear"].squeeze(0,1).unsqueeze(-1).cpu().numpy()
-#                    depth_raw_linear_hw1_resized = cv2_interpolate(depth_raw_linear_hw1, (wp, hp))
-#                    depth_raw_linear_11hw_resized = torch.from_numpy(depth_raw_linear_hw1_resized).squeeze(-1)[None,None,:,:].to(device=depth_raw_linear_11hw.device, dtype=depth_raw_linear_11hw.dtype)
-#
-#                    valid_mask_raw_11hw_bool = batch["valid_mask_raw"]
-#                    valid_mask_raw_hw1_float = batch["valid_mask_raw"].squeeze(0,1).unsqueeze(-1).cpu().float().numpy()
-#                    valid_mask_raw_hw1_float_resized = cv2_interpolate(valid_mask_raw_hw1_float, (wp, hp))
-#                    valid_mask_raw_11hw_bool_resized = torch.from_numpy(valid_mask_raw_hw1_float_resized).squeeze(-1)[None,None,:,:].to(device=valid_mask_raw_11hw_bool.device, dtype=valid_mask_raw_11hw_bool.dtype)
-#
-                    #batch_resized = {
-                    #    "rgb_int":          rgb_int_1chw_resized,
-                    #    "depth_raw_linear": depth_raw_linear_11hw_resized,
-                    #    "valid_mask_raw":   valid_mask_raw_11hw_bool_resized,
-                    #}
-                    batch_resized = {
-                        "rgb_int":          rgb_int_1chw_resized,
-                        "depth_raw_linear": None,
-                        "valid_mask_raw":   None,
-                    }
-
-                    batch = batch_resized
-                    rgb = rgb_float_1chw_resized
-                else:
-                    raise NotImplementedError(f"Image resizing not implemented for denoiser={sharpdepth_kind}")
-                
+                assert sharpdepth_kind in [SharpDepthKind.LOTUS, SharpDepthKind.PIXEL_PERFECT_DEPTH], f"Invalid sharpdepth kind: {sharpdepth_kind}"
+                preprocessor = MarigoldPreProcessor if sharpdepth_kind == SharpDepthKind.LOTUS else PixelPerfectDepthPreProcessor
+                rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(batch["rgb_int"], device, weight_dtype)
+                rgb_int_1chw_resized = (rgb_float_1chw_resized * 255.0).to(batch["rgb_int"].dtype)
+                batch_resized = {
+                    "rgb_int": rgb_int_1chw_resized,
+                    "depth_raw_linear": None,
+                    "valid_mask_raw": None,
+                }
+                batch = batch_resized
+                rgb = rgb_float_1chw_resized
 
                 ## UniDepth ##
 
@@ -1026,14 +1036,16 @@ if "__main__" == __name__:
                     # but it's in the original sharpdepth code, so we'll keep it.
                     # image, _, _ = pipeline.image_processor.preprocess(rgb, 768, "bilinear", accelerator.device)  # [N,3,PPH,PPW]
 
-                    disp_base = disp_base_11hw = base_depth_estimator_fn(rgb, rgb)
+                    disp_base = disp_base_11hw = base_depth_estimator_fn(og_batch["rgb_int"], preprocessor)
                     assert disp_base_11hw.shape[2:] == rgb.shape[2:], f"Base depth map doesn't match its input image resolution! disp_base_11hw.shape[2:] = {disp_base_11hw.shape[2:]}, rgb_float_1chw.shape[2:] = {rgb.shape[2:]}"
+
+                normalize_obj = depth_normalizer(disp_base)
+                norm_base_depth = normalize_obj["norm_depth"].to(dtype=weight_dtype)
+                norm_base_depth_unpadded = norm_base_depth[:,:,:norm_base_depth.shape[2]-padding[0],:norm_base_depth.shape[3]-padding[1]]
 
                 if sharpdepth_kind == SharpDepthKind.LOTUS:
 
-                    normalize_obj = depth_normalizer(disp_base)
-                    norm_base_depth = normalize_obj["norm_depth"].to(dtype=weight_dtype)
-
+                    assert args.blur_unidepth_output_ratio == 1, "Blurring the unidepth output is not supported for Lotus"
 
                     # 1. Encode depth (totally lotus-specific)
                     unidepth_latent = encode_depth(vae, norm_base_depth)
@@ -1085,11 +1097,15 @@ if "__main__" == __name__:
                         z = vae.post_quant_conv(latent.to(weight_dtype))
                         frozen_pred_depth = vae.decoder(z).mean(dim=1, keepdim=True)
 
+                        frozen_pred_depth_unpadded = frozen_pred_depth[:,:,:frozen_pred_depth.shape[2]-padding[0],:frozen_pred_depth.shape[3]-padding[1]]
+
                         # ---------------------------------
                         # calculate difference
                         l1_error = torch.abs(frozen_pred_depth - norm_base_depth)
                         l1_error = l1_error / l1_error.max()
                         l1_error = l1_error.clip(0, 1)
+
+                        l1_error_unpadded = l1_error[:,:,:l1_error.shape[2]-padding[0],:l1_error.shape[3]-padding[1]]
 
                         latent_mask = torch.nn.functional.interpolate(l1_error, scale_factor=1 / 8)
 
@@ -1149,9 +1165,12 @@ if "__main__" == __name__:
                     z = vae.post_quant_conv(latent.to(weight_dtype))
                     pred_depth = vae.decoder(z).mean(dim=1, keepdim=True)
 
+                    pred_depth_unpadded = pred_depth[:,:,:pred_depth.shape[2]-padding[0],:pred_depth.shape[3]-padding[1]]
+
                     depth_loss = l1_loss(
-                        pred_depth * 0.5 + 0.5, norm_base_depth * 0.5 + 0.5, l1_error
+                        pred_depth_unpadded * 0.5 + 0.5, norm_base_depth_unpadded * 0.5 + 0.5, l1_error_unpadded
                     )
+                    depth_mse = F.mse_loss(pred_depth_unpadded * 0.5 + 0.5, norm_base_depth_unpadded * 0.5 + 0.5, reduction="mean")
 
                     # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
 
@@ -1160,25 +1179,22 @@ if "__main__" == __name__:
                         with torch.no_grad():
 
                             frozen_pred_depth_aligned, _, _ = align_depth_least_square(
-                                gt_arr=(norm_base_depth * 0.5 + 0.5).detach().float().cpu().numpy(),
-                                pred_arr=frozen_pred_depth.detach().float().cpu().numpy(),
-                                valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
+                                gt_arr=(norm_base_depth_unpadded * 0.5 + 0.5).detach().float().cpu().numpy(),
+                                pred_arr=frozen_pred_depth_unpadded.detach().float().cpu().numpy(),
+                                valid_mask_arr=torch.ones_like(l1_error_unpadded).detach().bool().cpu().numpy(),
                                 return_scale_shift=True,
                                 max_resolution=None,
                             )
                             frozen_pred_depth_aligned = torch.from_numpy(frozen_pred_depth_aligned).to(device)
 
                             initial_depth_loss = l1_loss(
-                                frozen_pred_depth_aligned, norm_base_depth * 0.5 + 0.5, l1_error
+                                frozen_pred_depth_aligned, norm_base_depth_unpadded * 0.5 + 0.5, l1_error_unpadded
                             )
+                            initial_depth_mse = F.mse_loss(frozen_pred_depth_aligned, norm_base_depth_unpadded * 0.5 + 0.5, reduction="mean")
 
 
                 
                 elif sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
-
-                    # in this case, norm_base_depth is in log space!
-                    normalize_obj = depth_normalizer(torch.log(disp_base + 1))
-                    norm_base_depth = normalize_obj["norm_depth"].to(dtype=weight_dtype)
 
                     norm_base_depth = norm_base_depth * 0.5 + 0.5
 
@@ -1197,7 +1213,21 @@ if "__main__" == __name__:
                     
                         # ---------------------------------
                         # calculate difference
-                        l1_error = torch.abs(frozen_pred_depth - norm_base_depth)
+
+                        def blur(x_11hw, scale_factor):
+                            small_h = x_11hw.shape[2] // scale_factor
+                            small_w = x_11hw.shape[3] // scale_factor
+                            downscaled = TV_F.resize(x_11hw, size=(small_h, small_w), interpolation=TV_F.InterpolationMode.BILINEAR)
+                            upscaled = TV_F.resize(downscaled, size=(x_11hw.shape[2], x_11hw.shape[3]), interpolation=TV_F.InterpolationMode.BILINEAR)
+                            return upscaled
+                        
+                        def maybe_blur(x_11hw):
+                            if args.blur_unidepth_output_ratio != 1:
+                                return blur(x_11hw, args.blur_unidepth_output_ratio)
+                            else:
+                                return x_11hw
+                            
+                        l1_error = torch.abs(maybe_blur(frozen_pred_depth) - maybe_blur(norm_base_depth))
                         l1_error = l1_error / l1_error.max()
                         l1_error = l1_error.clip(0, 1)
                         l1_mask = l1_error
@@ -1208,12 +1238,13 @@ if "__main__" == __name__:
                         if should_use_conditioning:
                             conditioning_kind = "cond"
                             x0 = norm_base_depth - 0.5
-                            noisy_depth_cond = norm_base_depth * (1 - l1_mask) + (torch.randn_like(x0) * l1_mask)
+                            scaled_l1_mask = l1_mask * args.noise_aware_latent_noise_scale
+                            noisy_depth_cond = (norm_base_depth - 0.5) * (1 - scaled_l1_mask) + (torch.randn_like(x0) * scaled_l1_mask)
                             xT = torch.randn_like(latent)
 
                             xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
 
-                            student_input = torch.cat([xt, cond, noisy_depth_cond], dim=1)
+                            student_input = torch.cat([xt, cond, maybe_blur(noisy_depth_cond)], dim=1)
                         else:
                             conditioning_kind = "no_cond"
                             x0 = frozen_pred_depth - 0.5
@@ -1221,7 +1252,7 @@ if "__main__" == __name__:
                             xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
                             noisy_depth_cond = torch.randn_like(xt)
 
-                            student_input = torch.cat([xt, cond, noisy_depth_cond], dim=1)
+                            student_input = torch.cat([xt, cond, maybe_blur(noisy_depth_cond)], dim=1)
                     
                     with torch.autocast(device.type,dtype=weight_dtype):
                         student_pred_depth_latent_velocity = student_denoiser(x=student_input, semantics=semantics, timestep=timestep)
@@ -1242,8 +1273,21 @@ if "__main__" == __name__:
                     sds_loss = 0.5 * F.mse_loss(student_pred_depth_latent, (student_pred_depth_latent - score_vector).detach(), reduction="mean")
 
                     depth_loss = l1_loss(
-                        student_pred_depth_latent + 0.5, x0 + 0.5, l1_error
+                        maybe_blur(student_pred_depth_latent + 0.5), maybe_blur(x0 + 0.5), l1_error
                     )
+                    depth_mse = F.mse_loss(student_pred_depth_latent + 0.5, x0 + 0.5, reduction="mean")
+
+                    with torch.no_grad():
+
+                        final_pred_depth_aligned, _, _ = align_depth_least_square(
+                            gt_arr=(x0 + 0.5).detach().float().cpu().numpy(),
+                            pred_arr=student_pred_depth.detach().float().cpu().numpy(),
+                            valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
+                            return_scale_shift=True,
+                            max_resolution=None,
+                        )
+                        final_pred_depth_aligned = torch.from_numpy(final_pred_depth_aligned).to(device)
+                        final_aligned_depth_mse = F.mse_loss(final_pred_depth_aligned, x0 + 0.5, reduction="mean")
 
                     # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
 
@@ -1261,8 +1305,9 @@ if "__main__" == __name__:
                             frozen_pred_depth_aligned = torch.from_numpy(frozen_pred_depth_aligned).to(device)
 
                             initial_depth_loss = l1_loss(
-                                frozen_pred_depth_aligned, x0 + 0.5, l1_error
+                                maybe_blur(frozen_pred_depth_aligned), maybe_blur(x0 + 0.5), l1_error
                             )
+                            initial_depth_mse = F.mse_loss(frozen_pred_depth_aligned, x0 + 0.5, reduction="mean")
 
                 else:
                     raise NotImplementedError(f"Image resizing not implemented for denoiser={sharpdepth_kind}")
@@ -1289,9 +1334,10 @@ if "__main__" == __name__:
                     params_to_clip = student_denoiser.parameters()
                     accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
 
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad(set_to_none=args.set_grads_to_none)
+                if accelerator.sync_gradients:
+                    optimizer.step()
+                    lr_scheduler.step()
+                    optimizer.zero_grad(set_to_none=args.set_grads_to_none)
                 # ------------------------------------------------------------------
 
                 # Checks if the accelerator has performed an optimization step behind the scenes
@@ -1360,6 +1406,7 @@ if "__main__" == __name__:
                                 default_processing_resolution=default_processing_resolution,
                                 default_denoising_steps=default_denoising_steps,
                                 sharpdepth_kind=sharpdepth_kind,
+                                base_depth_estimator_fn=base_depth_estimator_fn,
                             ).to(accelerator.device, dtype=weight_dtype)
                             with torch.no_grad():
                                 images = []
@@ -1378,8 +1425,9 @@ if "__main__" == __name__:
                                             .numpy()
                                             .astype(np.uint8)
                                         )
+                                        rgb_int_1chw = torch.from_numpy(np.array(rgb)).to(torch.int32).permute(2, 0, 1).unsqueeze(0)
                                         out = pipeline(
-                                            rgb, base_depth_estimator_fn, processing_res=768, denoising_steps=1
+                                            rgb_int_1chw, base_depth_estimator_fn, processing_res=768, denoising_steps=1
                                         )
 
                                         depth_pred = torch.from_numpy(out.depth_np).to(
@@ -1512,13 +1560,19 @@ if "__main__" == __name__:
                         "total": (loss.detach(), torch.tensor(1,device=loss.device)),
                         "sds": (sds_loss.detach(), torch.tensor(1,device=sds_loss.device)),
                         "depth": (depth_loss.detach(), torch.tensor(1,device=depth_loss.device)),
+                        "depth_mse": (depth_mse.detach(), torch.tensor(1,device=depth_mse.device)),
+                        "depth_aligned_mse": (final_aligned_depth_mse.detach(), torch.tensor(1,device=final_aligned_depth_mse.device)),
                         "initial_depth": (initial_depth_loss.detach() if initial_depth_loss is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_loss.device) if initial_depth_loss is not None else torch.tensor(0,device=device)),
+                        "initial_depth_mse": (initial_depth_mse.detach() if initial_depth_mse is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_mse.device) if initial_depth_mse is not None else torch.tensor(0,device=device)),
                     },
                     "all": {
                         "total": (loss.detach(), torch.tensor(1,device=loss.device)),
                         "sds": (sds_loss.detach(), torch.tensor(1,device=sds_loss.device)),
                         "depth": (depth_loss.detach(), torch.tensor(1,device=depth_loss.device)),
+                        "depth_mse": (depth_mse.detach(), torch.tensor(1,device=depth_mse.device)),
+                        "depth_aligned_mse": (final_aligned_depth_mse.detach(), torch.tensor(1,device=final_aligned_depth_mse.device)),
                         "initial_depth": (initial_depth_loss.detach() if initial_depth_loss is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_loss.device) if initial_depth_loss is not None else torch.tensor(0,device=device)),
+                        "initial_depth_mse": (initial_depth_mse.detach() if initial_depth_mse is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_mse.device) if initial_depth_mse is not None else torch.tensor(0,device=device)),
                     },
                     **{empty_conditioning_kind:{loss_key:(torch.tensor(0,device=device,dtype=loss.dtype),torch.tensor(0,device=device,dtype=loss.dtype)) for loss_key in loss_keys} for empty_conditioning_kind in conditioning_kinds if empty_conditioning_kind not in [conditioning_kind, "all"]}
                 }
