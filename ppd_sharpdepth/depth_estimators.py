@@ -4,6 +4,9 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Type, Callable
 from PIL import Image
+import sys
+import os
+from mmengine.config import Config
 
 from diffusers import UNet2DConditionModel
 from ppd_sharpdepth.sharpdepth.util.alignment import align_depth_least_square
@@ -28,6 +31,22 @@ from ppd_sharpdepth.ppd.models.ppd import PixelPerfectDepth
 from .sharpdepth.pipeline.pipeline import SharpDepthPipeline
 from .sharpdepth_kinds import SharpDepthKind
 
+# For PatchRefiner, ensure registry is fresh.
+# Otherwise, this leads to a KeyError when importing PatchRefiner.
+
+print(sys.modules.keys())
+#for k in list(sys.modules.keys()):
+#    if k.startswith("estimator."):
+#        del sys.modules[k]
+
+#from .patchrefiner.estimator.registry import MODELS
+#MODELS.clear()
+#from .patchrefiner.estimator.registry import DATASETS
+#DATASETS.clear()
+
+#PatchRefiner = sys.modules["estimator.models.patchrefiner"]
+from .patchrefiner.checkpoints import download as download_checkpoints
+
 import torch.nn.functional as F
 
 from .preprocessors import PreProcessor, MarigoldPreProcessor, PixelPerfectDepthPreProcessor
@@ -45,6 +64,7 @@ ModelArchitecture = Enum(
             "depthanythinglarge",
             "pixelperfectdepth",
             "unidepth",
+            "patchrefiner",
             #"lotus",
         ]
     )
@@ -322,6 +342,52 @@ def get_depth_estimator_fn(
                 # print(f"Resized output from pixel perfect depth. shape: {depth_11hw.shape}, std: {depth_11hw.std()}, mean: {depth_11hw.mean()}, dtype: {depth_11hw.dtype}")
                 # raise NotImplementedError("Pixel Perfect Depth is not implemented yet")
 
+        case ModelArchitecture.patchrefiner:
+            from .patchrefiner.estimator.models.patchrefiner import PatchRefiner
+
+            CONFIG = "./patchrefiner/configs/pr_u4k.py"
+            COARSE_CHECKPOINT = "./patchrefiner/checkpoints/work_dir/zoedepth/u4k/coarse_pretrain/checkpoint_24.pth"
+            FINE_CHECKPOINT = "./patchrefiner/checkpoints/work_dir/zoedepth/u4k/pr/checkpoint_36.pth"
+            
+            if not (os.path.exists(COARSE_CHECKPOINT) and os.path.exists(FINE_CHECKPOINT)):
+                print("Checkpoint files are missing: Downloading...")
+                download_checkpoints()
+
+            # Load config file
+            cfg = Config.fromfile(CONFIG)
+
+            # Build the model
+            patchrefiner = PatchRefiner(cfg.model.config)
+            print("Model instantiated!")
+
+            # Load coarse branch checkpoint first
+            coarse_ckpt = torch.load(COARSE_CHECKPOINT, map_location='cpu')
+            patchrefiner.coarse_branch.load_state_dict(coarse_ckpt, strict=True)
+            print("Coarse branch loaded!")
+
+            # Load fine branch checkpoint
+            fine_ckpt = torch.load(FINE_CHECKPOINT)
+            patchrefiner.load_state_dict(fine_ckpt["model_state_dict"], strict=False)
+            print("Fine branch loaded!")
+
+            # Change to eval mode
+            patchrefiner.eval()
+            print("Switched to eval mode!")
+
+            patchrefiner = patchrefiner.to(device, dtype=float_dtype)
+            patchrefiner.requires_grad_(False)
+
+            @torch.autocast(device_type=device.type, dtype=float_dtype)
+            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
+                
+                rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
+
+                ret_11hw = patchrefiner.infer(
+                    (rgb_float_1chw_resized * 255).squeeze().int()
+                )["depth"]
+
+                return ret_11hw
+            
         case _:
             raise ValueError(f"Invalid model architecture: {model_architecture}")
 
