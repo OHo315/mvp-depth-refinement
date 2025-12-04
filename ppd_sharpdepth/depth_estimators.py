@@ -31,10 +31,11 @@ from ppd_sharpdepth.ppd.models.ppd import PixelPerfectDepth
 from .sharpdepth.pipeline.pipeline import SharpDepthPipeline
 from .sharpdepth_kinds import SharpDepthKind
 
-# For PatchRefiner, ensure registry is fresh.
-# Otherwise, this leads to a KeyError when importing PatchRefiner.
+# Debugging mmengine related issues
+# Initial thought: For PatchRefiner, ensure registry is fresh. Otherwise, this may lead to a KeyError when importing PatchRefiner.
+# Result: Upon further debugging, this does not solve the problem.
 
-print(sys.modules.keys())
+#print(sys.modules.keys())
 #for k in list(sys.modules.keys()):
 #    if k.startswith("estimator."):
 #        del sys.modules[k]
@@ -44,7 +45,10 @@ print(sys.modules.keys())
 #from .patchrefiner.estimator.registry import DATASETS
 #DATASETS.clear()
 
+# Attempt to get PatchRefiner model from mmengine. This does not work since it doesn't exist.
 #PatchRefiner = sys.modules["estimator.models.patchrefiner"]
+
+#from .patchrefiner.estimator.models.patchrefiner import PatchRefiner   # Moved this line to inside the function to prevent cyclic imports.
 from .patchrefiner.checkpoints import download as download_checkpoints
 
 import torch.nn.functional as F
