@@ -11,6 +11,7 @@ macrobatch_size=8
 gradient_accumulation_steps=$((macrobatch_size / num_gpus))
 
     # --student_ckpt_dir_revision depth_anything_small_run \
+    # --student_ckpt_dir_revision unidepth_partial \
 accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --sds_loss_weight 100.0 \
     --depth_weight 0.4 \
