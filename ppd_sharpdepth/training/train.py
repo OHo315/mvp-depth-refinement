@@ -549,7 +549,7 @@ if "__main__" == __name__:
     train_dataset: BaseDepthDataset = get_dataset(
         cfg_data.train,
         base_data_dir=base_data_dir,
-        #mode=DatasetMode.TRAIN,
+        # mode=DatasetMode.TRAIN,
         mode=DatasetMode.RGB_ONLY,
         augmentation_args=cfg.augmentation,
     )
@@ -970,7 +970,7 @@ if "__main__" == __name__:
     # and when it is, it might appear more times in one batch than another
 
     conditioning_kinds = ["no_cond","cond", "all"]
-    loss_keys = ["total","sds","depth","initial_depth","depth_mse","initial_depth_mse","depth_aligned_mse"]
+    loss_keys = ["total","sds","depth","initial_depth","depth_mse","initial_depth_mse","depth_aligned_mse","final_generation_depth_aligned_mse"]
 
     # initialize EMA buffers at 0
     loss_exponential_moving_averages = { conditioning_kind: { loss_key: 0.0 for loss_key in loss_keys } for conditioning_kind in conditioning_kinds }
@@ -1279,6 +1279,14 @@ if "__main__" == __name__:
 
                     with torch.no_grad():
 
+                        # let's do multiple diffusion steps
+                        final_generation_latent = noise
+                        for timestep in unwrapped_student_denoiser.sampling_timesteps:
+                            input = torch.cat([final_generation_latent, cond, maybe_blur(noisy_depth_cond)], dim=1)
+                            pred = student_denoiser(x=input, semantics=semantics, timestep=timestep)
+                            final_generation_latent = unwrapped_student_denoiser.sampler.step(pred=pred, x_t=final_generation_latent, t=timestep)
+                        final_generation_depth = final_generation_latent + 0.5
+
                         final_pred_depth_aligned, _, _ = align_depth_least_square(
                             gt_arr=(x0 + 0.5).detach().float().cpu().numpy(),
                             pred_arr=student_pred_depth.detach().float().cpu().numpy(),
@@ -1288,6 +1296,16 @@ if "__main__" == __name__:
                         )
                         final_pred_depth_aligned = torch.from_numpy(final_pred_depth_aligned).to(device)
                         final_aligned_depth_mse = F.mse_loss(final_pred_depth_aligned, x0 + 0.5, reduction="mean")
+
+                        final_generation_depth_aligned, _, _ = align_depth_least_square(
+                            gt_arr=(x0 + 0.5).detach().float().cpu().numpy(),
+                            pred_arr=final_generation_depth.detach().float().cpu().numpy(),
+                            valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
+                            return_scale_shift=True,
+                            max_resolution=None,
+                        )
+                        final_generation_depth_aligned = torch.from_numpy(final_generation_depth_aligned).to(device)
+                        final_generation_aligned_depth_mse = F.mse_loss(final_generation_depth_aligned, x0 + 0.5, reduction="mean")
 
                     # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
 
@@ -1564,6 +1582,7 @@ if "__main__" == __name__:
                         "depth_aligned_mse": (final_aligned_depth_mse.detach(), torch.tensor(1,device=final_aligned_depth_mse.device)),
                         "initial_depth": (initial_depth_loss.detach() if initial_depth_loss is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_loss.device) if initial_depth_loss is not None else torch.tensor(0,device=device)),
                         "initial_depth_mse": (initial_depth_mse.detach() if initial_depth_mse is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_mse.device) if initial_depth_mse is not None else torch.tensor(0,device=device)),
+                        "final_generation_depth_aligned_mse": (final_generation_aligned_depth_mse.detach(), torch.tensor(1,device=final_generation_aligned_depth_mse.device)),
                     },
                     "all": {
                         "total": (loss.detach(), torch.tensor(1,device=loss.device)),
@@ -1573,6 +1592,7 @@ if "__main__" == __name__:
                         "depth_aligned_mse": (final_aligned_depth_mse.detach(), torch.tensor(1,device=final_aligned_depth_mse.device)),
                         "initial_depth": (initial_depth_loss.detach() if initial_depth_loss is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_loss.device) if initial_depth_loss is not None else torch.tensor(0,device=device)),
                         "initial_depth_mse": (initial_depth_mse.detach() if initial_depth_mse is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_mse.device) if initial_depth_mse is not None else torch.tensor(0,device=device)),
+                        "final_generation_depth_aligned_mse": (final_generation_aligned_depth_mse.detach(), torch.tensor(1,device=final_generation_aligned_depth_mse.device)),
                     },
                     **{empty_conditioning_kind:{loss_key:(torch.tensor(0,device=device,dtype=loss.dtype),torch.tensor(0,device=device,dtype=loss.dtype)) for loss_key in loss_keys} for empty_conditioning_kind in conditioning_kinds if empty_conditioning_kind not in [conditioning_kind, "all"]}
                 }
