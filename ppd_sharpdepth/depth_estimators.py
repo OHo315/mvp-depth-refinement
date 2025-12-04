@@ -126,7 +126,7 @@ def get_depth_estimator_fn(
             pipeline = pipeline.to(device, dtype=float_dtype)
 
             @torch.autocast(device_type=device.type, dtype=float_dtype)
-            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
+            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor], internal=False):
                 out = pipeline(rgb_int_1chw)
 
                 #out.depth_base_colored.save(os.path.join(output_dir, batch.split(".")[0] + f"_{args.base_model}.jpg"))
@@ -175,7 +175,7 @@ def get_depth_estimator_fn(
             pipeline = pipeline.to(device, dtype=float_dtype)
 
             @torch.autocast(device_type=device.type, dtype=float_dtype)
-            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
+            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor], internal=False):
                 #with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 out = pipeline(rgb_int_1chw)
 
@@ -191,13 +191,24 @@ def get_depth_estimator_fn(
             unidepth.requires_grad_(False)
 
             @torch.autocast(device_type=device.type, dtype=float_dtype)
-            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
+            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor], internal=False):
                 
                 rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
 
-                ret_11hw = unidepth.infer(
+                base_pred = unidepth.infer(
                     (rgb_float_1chw_resized * 255).squeeze().int()
                 )["depth"]
+
+                if internal:
+                    #ret_11hw = torch.from_numpy(base_pred)
+                    return base_pred
+
+                image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
+                base_pred = image_processor.unpad_image(base_pred, padding)  # [N*E,1,PH,PW]
+                base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+                base_pred = base_pred.squeeze().float().cpu().numpy()
+
+                ret_11hw = torch.from_numpy(base_pred)
 
                 return ret_11hw
 
@@ -240,9 +251,9 @@ def get_depth_estimator_fn(
             )
 
             @torch.autocast(device_type=device.type, dtype=float_dtype)
-            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]): 
+            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor], internal=False): 
 
-                rgb_float_1chw_resized, *_ = preprocessor.run(rgb_int_1chw, device, float_dtype)
+                rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
 
                 image_1hwc = transform(
                     {
@@ -268,8 +279,19 @@ def get_depth_estimator_fn(
                     mode="bilinear",
                     align_corners=False,
                 )
+                
+                if internal:
+                    return depth_resized_11hw
 
-                return depth_resized_11hw
+                image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
+                base_pred = image_processor.unpad_image(depth_resized_11hw, padding)  # [N*E,1,PH,PW]
+                base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+                base_pred = base_pred.squeeze().float().cpu().numpy()
+
+                ret_11hw = torch.from_numpy(base_pred)
+
+                return ret_11hw
+
 
                 # sanity check (Good! Matches the stats in submodules/Depth-Anything/run.py):
                 # filename:  submodules/SharpDepth/assets/in-the-wild_example/00.jpg
@@ -282,13 +304,22 @@ def get_depth_estimator_fn(
 
         case ModelArchitecture.pixelperfectdepth: 
 
-            DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR="LiheYoung/depth_anything_vits14"
-            depth_anything_small_fn = get_depth_estimator_fn(
-                ModelArchitecture.depthanythingsmall,
+            #DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR="LiheYoung/depth_anything_vits14"
+            #depth_anything_small_fn = get_depth_estimator_fn(
+            #    ModelArchitecture.depthanythingsmall,
+            #    device,
+            #    float_dtype,
+            #    DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR
+            #)
+
+            UNIDEPTH_CHECKPOINT_DIR="lpiccinelli/unidepth-v1-vitl14"
+            unidepth_fn = get_depth_estimator_fn(
+                ModelArchitecture.unidepth,
                 device,
                 float_dtype,
-                DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR
+                UNIDEPTH_CHECKPOINT_DIR
             )
+
 
             model = PixelPerfectDepth.from_pretrained(
                 checkpoint_filepath, subfolder="ppd"
@@ -297,13 +328,15 @@ def get_depth_estimator_fn(
             model.requires_grad_(False)
 
             @torch.autocast(device_type=device.type, dtype=float_dtype)
-            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
+            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor], internal=False):
                 preprocessor = PixelPerfectDepthPreProcessor
  
                 rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
                 rgb_int_1chw_resized = (rgb_float_1chw_resized * 255).to(torch.int32)
 
-                metric_depth_base = depth_anything_small_fn(rgb_int_1chw, preprocessor)
+                #metric_depth_base = depth_anything_small_fn(rgb_int_1chw, preprocessor, internal=True)
+                #metric_depth_base = unidepth_fn(rgb_int_1chw, MarigoldPreProcessor, internal=True)
+                metric_depth_base = unidepth_fn(rgb_int_1chw, preprocessor, internal=True)
 
                 H, W = rgb_float_1chw_resized.squeeze(0).shape[1:3]
                 raw_image_hwc = (
@@ -332,10 +365,17 @@ def get_depth_estimator_fn(
 
                 depth_11hw_aligned = torch.exp(depth_11hw_aligned) - 1
 
-                # Rescale
+                if internal:
+                    return depth_11hw_aligned
 
-                return depth_11hw_aligned
+                image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
+                base_pred = image_processor.unpad_image(depth_11hw_aligned, padding)  # [N*E,1,PH,PW]
+                base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+                base_pred = base_pred.squeeze().float()
 
+                ret_11hw = base_pred
+
+                return ret_11hw
 
 
                 # sanity check (passes!)

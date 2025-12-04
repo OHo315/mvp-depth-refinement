@@ -60,7 +60,7 @@ def rmse(predicted: np.ndarray, ground: np.ndarray, valid_mask: np.ndarray):
 
     return rmse
 
-def dbe_accuracy(predicted, ground):
+def dbe_accuracy(predicted: np.ndarray, ground: np.ndarray, valid_mask: np.ndarray):
     """
     Parameters:
     predicted { np.array(ndim=2) } 
@@ -86,11 +86,15 @@ def dbe_accuracy(predicted, ground):
 
     # Rescale predicted_edges so it is between 0 and 1
     predicted_edges = predicted_edges / 255
-
+ 
     # Euclidean Distance Transform
     ground_dist = cv.distanceTransform(ground_edges, cv.DIST_L2, 5)
 
-    print(f"Predicted Edges:\n{predicted_edges}\n\nGround EDT:\n{ground_dist}")
+    # Apply valid mask.
+    predicted_edges *= valid_mask
+    ground_dist *= valid_mask
+
+    #print(f"Predicted Edges:\n{predicted_edges}\n\nGround EDT:\n{ground_dist}")
 
     # Calculate depth boundary accuracy error
     dbe_acc = np.sum(ground_dist * predicted_edges) / np.sum(predicted_edges)
@@ -117,53 +121,20 @@ def dbe_completeness(predicted: np.ndarray, ground: np.ndarray, valid_mask: np.n
         return None
     
     # Calculate the depth bounary completeness error by calling the accuracy error function with reversed arguments 
-    dbe_comp = dbe_accuracy(ground, predicted)
+
+    # Normalize to 0–255, because canny maps work on 8bit grayscale imgs.
+    predicted = predicted - predicted.min()
+    if predicted.max() > 0:
+        predicted = predicted / predicted.max()
+    predicted = (predicted * 255).astype(np.uint8)
+
+    ground = ground - ground.min()
+    if ground.max() > 0:
+        ground = ground / ground.max()
+    ground = (ground * 255).astype(np.uint8)
+
+
+    dbe_comp = dbe_accuracy(ground, predicted, valid_mask)
 
     return dbe_comp
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

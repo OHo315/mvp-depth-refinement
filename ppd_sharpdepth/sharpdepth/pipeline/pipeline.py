@@ -241,7 +241,7 @@ class SharpDepthPipeline(DiffusionPipeline):
         ), f"Wrong input shape {input_size}, expected [1, rgb, H, W]"
 
         if self.sharpdepth_kind == SharpDepthKind.LOTUS:
-            depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, MarigoldPreProcessor)
+            depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, MarigoldPreProcessor, internal=True)
 
             rgb_float_1chw_resized, padding, original_resolution = MarigoldPreProcessor.run(rgb_int_1chw, self.device, self.dtype)
 
@@ -292,7 +292,7 @@ class SharpDepthPipeline(DiffusionPipeline):
             initial_pred = lotus_depth_initial
             l1_error = l1_error
         elif self.sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH: 
-            depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, PixelPerfectDepthPreProcessor)
+            depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, PixelPerfectDepthPreProcessor, internal=True)
             rgb_float_1chw_resized, padding, original_resolution = PixelPerfectDepthPreProcessor.run(rgb_int_1chw, self.device, self.dtype)
 
             normalize_obj = self.depth_normalizer(depth_base_11hw)

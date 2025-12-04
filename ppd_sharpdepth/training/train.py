@@ -1038,7 +1038,7 @@ if "__main__" == __name__:
                     # but it's in the original sharpdepth code, so we'll keep it.
                     # image, _, _ = pipeline.image_processor.preprocess(rgb, 768, "bilinear", accelerator.device)  # [N,3,PPH,PPW]
 
-                    disp_base = disp_base_11hw = base_depth_estimator_fn(og_batch["rgb_int"], preprocessor)
+                    disp_base = disp_base_11hw = base_depth_estimator_fn(og_batch["rgb_int"], preprocessor,internal=True)
                     assert disp_base_11hw.shape[2:] == rgb.shape[2:], f"Base depth map doesn't match its input image resolution! disp_base_11hw.shape[2:] = {disp_base_11hw.shape[2:]}, rgb_float_1chw.shape[2:] = {rgb.shape[2:]}"
 
                 normalize_obj = depth_normalizer(disp_base)
@@ -1200,6 +1200,22 @@ if "__main__" == __name__:
 
                     norm_base_depth = norm_base_depth * 0.5 + 0.5
 
+                    # ---------------------------------
+                    # calculate difference
+
+                    def blur(x_11hw, scale_factor):
+                        small_h = x_11hw.shape[2] // scale_factor
+                        small_w = x_11hw.shape[3] // scale_factor
+                        downscaled = TV_F.resize(x_11hw, size=(small_h, small_w), interpolation=TV_F.InterpolationMode.BILINEAR)
+                        upscaled = TV_F.resize(downscaled, size=(x_11hw.shape[2], x_11hw.shape[3]), interpolation=TV_F.InterpolationMode.BILINEAR)
+                        return upscaled
+                    
+                    def maybe_blur(x_11hw):
+                        if args.blur_unidepth_output_ratio != 1:
+                            return blur(x_11hw, args.blur_unidepth_output_ratio)
+                        else:
+                            return x_11hw
+                            
                     # initial PPD
                     with torch.no_grad():
                         cond = rgb - 0.5
@@ -1207,28 +1223,13 @@ if "__main__" == __name__:
                         with torch.autocast(device.type,dtype=weight_dtype):
                             semantics = unwrapped_frozen_denoiser.semantics_prompt(rgb)
                             latent = noise
+                            noisy_depth_cond = torch.randn_like(latent)
                             for timestep in unwrapped_student_denoiser.sampling_timesteps:
-                                input = torch.cat([latent, cond], dim=1)
-                                pred = frozen_denoiser(x=input, semantics=semantics, timestep=timestep)
+                                input = torch.cat([latent, cond, maybe_blur(noisy_depth_cond)], dim=1)
+                                pred = student_denoiser(x=input, semantics=semantics, timestep=timestep)
                                 latent = unwrapped_student_denoiser.sampler.step(pred=pred, x_t=latent, t=timestep)
                             frozen_pred_depth = latent + 0.5
                     
-                        # ---------------------------------
-                        # calculate difference
-
-                        def blur(x_11hw, scale_factor):
-                            small_h = x_11hw.shape[2] // scale_factor
-                            small_w = x_11hw.shape[3] // scale_factor
-                            downscaled = TV_F.resize(x_11hw, size=(small_h, small_w), interpolation=TV_F.InterpolationMode.BILINEAR)
-                            upscaled = TV_F.resize(downscaled, size=(x_11hw.shape[2], x_11hw.shape[3]), interpolation=TV_F.InterpolationMode.BILINEAR)
-                            return upscaled
-                        
-                        def maybe_blur(x_11hw):
-                            if args.blur_unidepth_output_ratio != 1:
-                                return blur(x_11hw, args.blur_unidepth_output_ratio)
-                            else:
-                                return x_11hw
-                            
                         l1_error = torch.abs(maybe_blur(frozen_pred_depth) - maybe_blur(norm_base_depth))
                         l1_error = l1_error / l1_error.max()
                         l1_error = l1_error.clip(0, 1)
@@ -1244,12 +1245,12 @@ if "__main__" == __name__:
                             noisy_depth_cond = (norm_base_depth - 0.5) * (1 - scaled_l1_mask) + (torch.randn_like(x0) * scaled_l1_mask)
                             xT = torch.randn_like(latent)
 
-                            xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
+                            xt = unwrapped_student_denoiser.schedule.forward(frozen_pred_depth - 0.5, xT, timestep)
 
                             student_input = torch.cat([xt, cond, maybe_blur(noisy_depth_cond)], dim=1)
                         else:
                             conditioning_kind = "no_cond"
-                            x0 = frozen_pred_depth - 0.5
+                            x0 = norm_base_depth - 0.5
                             xT = noise
                             xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
                             noisy_depth_cond = torch.randn_like(xt)
@@ -1587,9 +1588,9 @@ if "__main__" == __name__:
                             avg_rmse_base /= total_images
                             avg_rmse_initial /= total_images
                             logs = {
-                                "val_rmse": round(avg_rmse.cpu().item(), 4),
-                                "val_rmse_base": round(avg_rmse_base.cpu().item(), 4),
-                                "val_rmse_initial": round(avg_rmse_initial.cpu().item(), 4),
+                                "val_rmse": round(avg_rmse.item(), 4),
+                                "val_rmse_base": round(avg_rmse_base.item(), 4),
+                                "val_rmse_initial": round(avg_rmse_initial.item(), 4),
                             }
                             accelerator.log(logs, step=global_step)
 

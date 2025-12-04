@@ -200,7 +200,7 @@ class BaseDepthDataset(Dataset):
             image_to_read = image_to_read.read()
             image_to_read = io.BytesIO(image_to_read)
         else:
-            print("TESTING:", self.dataset_dir, img_rel_path)
+            #print("TESTING:", self.dataset_dir, img_rel_path)
             image_to_read = os.path.join(self.dataset_dir, img_rel_path)
         image = Image.open(image_to_read)  # [H, W, rgb]
         image = np.asarray(image)

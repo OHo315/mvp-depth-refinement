@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from pprint import pprint
+import subprocess
 
 from ppd_sharpdepth.depth_estimators import ModelArchitecture 
 from script.evaluation.metrics import abs_rel, rmse, dbe_completeness
@@ -24,9 +25,11 @@ if __name__ == "__main__":
 
     dataset_config_path = args.dataset_config_path
     model_architecture = ModelArchitecture(args.model_architecture)
+    run_message = input("Give a message for this eval run: ")
     
     BASE_DATA_DIR = Path(os.environ["BASE_DATA_DIR"])
     BASE_PREDS_DIR = Path(os.environ["BASE_PREDS_DIR"])
+    results_filepath = Path("results.csv")
 
     cfg_data = OmegaConf.load(dataset_config_path)
     
@@ -65,13 +68,24 @@ if __name__ == "__main__":
 
         total_abs_rel += abs_rel(depth_pred, depth_raw, valid_mask)   
         total_rmse += rmse(depth_pred, depth_raw, valid_mask)
-        #total_dbe += dbe_completeness(depth_pred, depth_raw) # TODO: Add support for dbe valid mask.
+        total_dbe += dbe_completeness(depth_pred, depth_raw, valid_mask) 
 
+    gitname = subprocess.check_output(["git", "config", "user.name"]).decode().strip()
+    
+    # Update tracker.
+    df = pd.read_csv(results_filepath)
     metrics = {
+        "id": len(df[df["gitname"] == gitname]),
+        "gitname": gitname,
+        "model_architecture": model_architecture.value,
+        "preds_dataset": cfg_data.dir,
+        "run_message": run_message,
         "abs_rel": total_abs_rel / len(dataloader),
         "rmse": total_rmse / len(dataloader),
-        #"dbe": total_dbe / len(dataloader)
+        "dbe": total_dbe / len(dataloader),
     }
+    df = pd.concat([df, pd.DataFrame([metrics])])
+    df.to_csv(results_filepath)
 
     pprint(metrics)
 

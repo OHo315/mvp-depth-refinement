@@ -8,7 +8,7 @@ import numpy as np
 from pydantic import BaseModel
 
 BASE_DATA_DIR = os.environ["BASE_DATA_DIR"]
-RAW_DIR = BASE_DATA_DIR + "middlebury_raw"
+RAW_DIR = BASE_DATA_DIR + "middlebury_raw/data"
 PROCESSED_DIR = BASE_DATA_DIR + "middlebury_processed/test"
 
 
