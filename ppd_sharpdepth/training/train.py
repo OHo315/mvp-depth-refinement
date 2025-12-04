@@ -1587,9 +1587,9 @@ if "__main__" == __name__:
                             avg_rmse_base /= total_images
                             avg_rmse_initial /= total_images
                             logs = {
-                                "val_rmse": round(avg_rmse.cpu().item(), 4),
-                                "val_rmse_base": round(avg_rmse_base.cpu().item(), 4),
-                                "val_rmse_initial": round(avg_rmse_initial.cpu().item(), 4),
+                                "val_rmse": round(avg_rmse.item(), 4),
+                                "val_rmse_base": round(avg_rmse_base.item(), 4),
+                                "val_rmse_initial": round(avg_rmse_initial.item(), 4),
                             }
                             accelerator.log(logs, step=global_step)
 
