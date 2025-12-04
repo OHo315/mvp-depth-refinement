@@ -17,6 +17,7 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --depth_weight 0.4 \
     --base_ckpt_dir andrew-healey/sharpdepth \
     --student_ckpt_dir andrew-healey/sharpdepth \
+    --student_ckpt_dir_revision identity_blur_2 \
     --add_datetime_prefix \
     --report_to wandb \
     --mixed_precision bf16 \
@@ -26,7 +27,7 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --lr_scheduler cosine \
     --lr_warmup_steps 100 \
     --tracker_project_name ppd_sharpdepth_train \
-    --wandb_name "identity_blur_2" \
+    --wandb_name "identity_blur_2_resume" \
     --set_grads_to_none \
     --checkpointing_steps 500 \
     --validation_steps 200 \
