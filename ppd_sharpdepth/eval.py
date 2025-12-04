@@ -68,7 +68,7 @@ if __name__ == "__main__":
 
         total_abs_rel += abs_rel(depth_pred, depth_raw, valid_mask)   
         total_rmse += rmse(depth_pred, depth_raw, valid_mask)
-        total_dbe += dbe_completeness(depth_pred, depth_raw, valid_mask) # TODO: Add support for dbe valid mask.
+        total_dbe += dbe_completeness(depth_pred, depth_raw, valid_mask) 
 
     gitname = subprocess.check_output(["git", "config", "user.name"]).decode().strip()
     

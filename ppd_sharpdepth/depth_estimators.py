@@ -229,7 +229,7 @@ def get_depth_estimator_fn(
             @torch.autocast(device_type=device.type, dtype=float_dtype)
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor], internal=False): 
 
-                rgb_float_1chw_resized, *_ = preprocessor.run(rgb_int_1chw, device, float_dtype)
+                rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
 
                 image_1hwc = transform(
                     {
@@ -255,8 +255,19 @@ def get_depth_estimator_fn(
                     mode="bilinear",
                     align_corners=False,
                 )
+                
+                if internal:
+                    return depth_resized_11hw
 
-                return depth_resized_11hw
+                image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
+                base_pred = image_processor.unpad_image(depth_resized_11hw, padding)  # [N*E,1,PH,PW]
+                base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+                base_pred = base_pred.squeeze().float().cpu().numpy()
+
+                ret_11hw = torch.from_numpy(base_pred)
+
+                return ret_11hw
+
 
                 # sanity check (Good! Matches the stats in submodules/Depth-Anything/run.py):
                 # filename:  submodules/SharpDepth/assets/in-the-wild_example/00.jpg
@@ -269,13 +280,22 @@ def get_depth_estimator_fn(
 
         case ModelArchitecture.pixelperfectdepth: 
 
-            DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR="LiheYoung/depth_anything_vits14"
-            depth_anything_small_fn = get_depth_estimator_fn(
-                ModelArchitecture.depthanythingsmall,
+            #DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR="LiheYoung/depth_anything_vits14"
+            #depth_anything_small_fn = get_depth_estimator_fn(
+            #    ModelArchitecture.depthanythingsmall,
+            #    device,
+            #    float_dtype,
+            #    DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR
+            #)
+
+            UNIDEPTH_CHECKPOINT_DIR="lpiccinelli/unidepth-v1-vitl14"
+            unidepth_fn = get_depth_estimator_fn(
+                ModelArchitecture.unidepth,
                 device,
                 float_dtype,
-                DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR
+                UNIDEPTH_CHECKPOINT_DIR
             )
+
 
             model = PixelPerfectDepth.from_pretrained(
                 checkpoint_filepath, subfolder="ppd"
@@ -290,7 +310,9 @@ def get_depth_estimator_fn(
                 rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
                 rgb_int_1chw_resized = (rgb_float_1chw_resized * 255).to(torch.int32)
 
-                metric_depth_base = depth_anything_small_fn(rgb_int_1chw, preprocessor)
+                #metric_depth_base = depth_anything_small_fn(rgb_int_1chw, preprocessor, internal=True)
+                #metric_depth_base = unidepth_fn(rgb_int_1chw, MarigoldPreProcessor, internal=True)
+                metric_depth_base = unidepth_fn(rgb_int_1chw, preprocessor, internal=True)
 
                 H, W = rgb_float_1chw_resized.squeeze(0).shape[1:3]
                 raw_image_hwc = (
@@ -325,7 +347,7 @@ def get_depth_estimator_fn(
                 image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
                 base_pred = image_processor.unpad_image(depth_11hw_aligned, padding)  # [N*E,1,PH,PW]
                 base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
-                base_pred = base_pred.squeeze().float().cpu().numpy()
+                base_pred = base_pred.squeeze().float()
 
                 ret_11hw = base_pred
 
