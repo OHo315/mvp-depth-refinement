@@ -1,6 +1,6 @@
 name: kitti_depth
 disp_name: kitti_depth
 dir: kitti 
-filenames: data_split/kitti_depth/eigen_test_files_with_gt_filtered.txt
+filenames: data_split/kitti_depth/eigen_test_files_with_gt_filtered_smaller.txt
 kitti_bm_crop: false
 valid_mask_crop: eigen

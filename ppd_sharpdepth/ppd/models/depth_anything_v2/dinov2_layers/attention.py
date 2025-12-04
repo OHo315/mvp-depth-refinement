@@ -12,6 +12,8 @@ import logging
 
 from torch import Tensor
 from torch import nn
+import torch
+import os
 
 
 logger = logging.getLogger("dinov2")
@@ -24,6 +26,8 @@ try:
 except ImportError:
     logger.warning("xFormers not available")
     XFORMERS_AVAILABLE = False
+
+XFORMERS_AVAILABLE = XFORMERS_AVAILABLE and torch.cuda.is_available() and os.environ.get("XFORMERS_DISABLED") is None
 
 
 class Attention(nn.Module):

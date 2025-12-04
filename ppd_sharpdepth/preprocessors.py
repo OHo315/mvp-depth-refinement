@@ -34,7 +34,7 @@ class MarigoldPreProcessor(PreProcessor):
         rgb_int_1chw = rgb_int_1chw.to(torch.uint8)
 
         rgb_float_1chw_resized, padding, original_resolution = image_processor.preprocess(rgb_int_1chw, processing_res, resample_method, device)  # [N,3,PPH,PPW]
-        
+
         assert rgb_float_1chw_resized.dtype == float_dtype, f"rgb_float_1chw_resized must be of dtype {float_dtype}, got {rgb_float_1chw_resized.dtype}"
         return rgb_float_1chw_resized, padding, original_resolution
 
@@ -50,6 +50,9 @@ class PixelPerfectDepthPreProcessor(PreProcessor):
         hp, wp, _ = resized_rgb_float_HpWpC.shape
         rgb_float_1chw_resized = torch.from_numpy(resized_rgb_float_HpWpC).permute(2, 0, 1).unsqueeze(0).to(device=device, dtype=rgb_float_1chw.dtype)
 
+        _, _, h, w = rgb_int_1chw.shape
+        original_resolution = torch.Size([h, w])
+
         assert rgb_float_1chw_resized.dtype == float_dtype, f"rgb_float_1chw_resized must be of dtype {float_dtype}, got {rgb_float_1chw_resized.dtype}"
-        return rgb_float_1chw_resized, None, None
+        return rgb_float_1chw_resized, None, original_resolution
 

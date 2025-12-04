@@ -115,26 +115,41 @@ def get_depth_estimator_fn(
 
         case ModelArchitecture.sharpdepth_ppd_unidepth:
 
-            DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR="LiheYoung/depth_anything_vits14"
+            #with torch.autocast(device_type="cuda", dtype=torch.bfloat16): 
+            UNIDEPTH_CHECKPOINT_DIR="lpiccinelli/unidepth-v1-vitl14"
             base_depth_estimator_fn = get_depth_estimator_fn(
-                ModelArchitecture.depthanythingsmall, 
-                device, float_dtype, 
-                DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR
+                ModelArchitecture.unidepth, 
+                device, 
+                float_dtype, 
+                UNIDEPTH_CHECKPOINT_DIR
             )
+
+            frozen_unet = PixelPerfectDepth.from_pretrained("andrew-healey/sharpdepth", subfolder="ppd", revision="unidepth_partial")
+            frozen_unet = frozen_unet.to(device, dtype=float_dtype).eval()
+            frozen_unet.requires_grad_(False)
+
+            student_unet = PixelPerfectDepth.from_pretrained("andrew-healey/sharpdepth", subfolder="ppd_student", revision="unidepth_partial")
+            student_unet = student_unet.to(device, dtype=float_dtype).eval()
+            student_unet.requires_grad_(False)
+
 
             pipeline = SharpDepthPipeline.from_pretrained(
                 checkpoint_filepath, 
-                sharpdepth_kind=SharpDepthKind.PPD, 
+                sharpdepth_kind=SharpDepthKind.PIXEL_PERFECT_DEPTH, 
                 base_depth_estimator_fn=base_depth_estimator_fn,
                 default_processing_resolution=768, 
-                default_denoising_steps=1
+                default_denoising_steps=1,
+                frozen_unet=frozen_unet,
+                unet=student_unet
             )
             assert pipeline.default_processing_resolution == 768, f"default_processing_resolution = {pipeline.default_processing_resolution}, expected 768"
             assert pipeline.default_denoising_steps == 1, f"default_denoising_steps = {pipeline.default_denoising_steps}, expected 1"
 
             pipeline = pipeline.to(device, dtype=float_dtype)
-
+                
+            #@torch.autocast(device_type="cuda",dtype=torch.bfloat16)
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor]):
+                #with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 out = pipeline(rgb_int_1chw)
 
                 h, w = out.depth_np.shape

@@ -101,6 +101,9 @@ def process_middlebury_raw() -> None:
         moved_scene_depth_filepath = Path(
             processed_dirpath / f"depth_{scene_folder.name}.png"
         )
+        print("from",scene_rgb_file) 
+        print("to", moved_scene_rgb_filepath)
+        print("scene_folder", scene_folder)
         shutil.copy(scene_rgb_file, moved_scene_rgb_filepath)
 
         img = read_pfm(scene_depth_file)

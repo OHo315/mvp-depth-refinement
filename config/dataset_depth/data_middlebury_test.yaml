@@ -1,4 +1,4 @@
 name: middlebury_depth
-disp_name: middlebury_depth_test_full
+disp_name: middlebury_depth
 dir: middlebury_processed/test
 filenames: data_split/middlebury_depth/filename_list_test.txt

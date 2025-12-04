@@ -281,7 +281,7 @@ class SharpDepthPipeline(DiffusionPipeline):
         elif self.sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH: 
             depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, PixelPerfectDepthPreProcessor)
 
-            rgb_float_1chw_resized, *_ = PixelPerfectDepthPreProcessor.run(rgb_int_1chw, self.device, self.dtype)
+            rgb_float_1chw_resized, _, original_resolution = PixelPerfectDepthPreProcessor.run(rgb_int_1chw, self.device, self.dtype)
 
             normalize_obj = self.depth_normalizer(depth_base_11hw)
             norm_base_depth = normalize_obj["norm_depth"].to(dtype=self.unet.dtype)
