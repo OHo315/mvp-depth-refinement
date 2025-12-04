@@ -8,5 +8,5 @@ __pycache__
 /train_output
 /checkpoints
 /wandb
-/patchrefiner/work_dir
+/ppd_sharpdepth/patchrefiner/work_dir
 nohup.out
