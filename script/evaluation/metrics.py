@@ -1,7 +1,7 @@
 import numpy as np
 import cv2 as cv
 
-def abs_rel(predicted: np.array, ground: np.array):
+def abs_rel(predicted: np.ndarray, ground: np.ndarray, valid_mask: np.ndarray):
     """
     Parameters:
     predicted { np.array(ndim=2) } 
@@ -26,14 +26,14 @@ def abs_rel(predicted: np.array, ground: np.array):
     ground += 1
     
     # Calculate the absolute relative error
-    print(ground)
     absmap = np.abs(predicted - ground)
+    absmap[~valid_mask] = 0.0
     absmap = absmap / ground
-    absrel = np.sum(absmap) / ground.size
+    absrel = np.sum(absmap) / np.sum(valid_mask) 
 
     return absrel
 
-def rmse(predicted, ground):
+def rmse(predicted: np.ndarray, ground: np.ndarray, valid_mask: np.ndarray):
     """
     Parameters:
     predicted { np.array(ndim=2) } 
@@ -55,7 +55,8 @@ def rmse(predicted, ground):
     
     # Calculate the root mean square error
     error = predicted - ground
-    rmse = (np.sum(error ** 2) / ground.size) ** 0.5
+    error[~valid_mask] = 0.0
+    rmse = (np.sum(error ** 2) / np.sum(valid_mask)) ** 0.5
 
     return rmse
 
@@ -95,7 +96,7 @@ def dbe_accuracy(predicted, ground):
     dbe_acc = np.sum(ground_dist * predicted_edges) / np.sum(predicted_edges)
     return dbe_acc
 
-def dbe_completeness(predicted, ground):
+def dbe_completeness(predicted: np.ndarray, ground: np.ndarray, valid_mask: np.ndarray):
     """
     Parameters:
     predicted { np.array(ndim=2) } 
@@ -120,51 +121,49 @@ def dbe_completeness(predicted, ground):
 
     return dbe_comp
 
-# Test evaluations
-# Create test depth maps
-cv.imwrite("./test_images/test_prediction.jpg", 
-    np.array([
-    [100, 100, 100, 100, 100, 1],
-    [100, 100, 100, 100, 1, 100],
-    [100, 100, 100, 1, 100, 100],
-    [100, 100, 1, 100, 100, 100],
-    [100, 1, 100, 100, 100, 100],
-    [1, 100, 100, 100, 100, 100]
-    ], dtype=np.uint8)
-)
-cv.imwrite("./test_images/test_ground_truth.jpg", 
-    np.array([
-    [100, 100, 100, 100, 50, 10],
-    [100, 100, 100, 50, 10, 50],
-    [100, 100, 50, 10, 50, 100],
-    [100, 50, 10, 50, 100, 100],
-    [50, 10, 50, 100, 100, 100],
-    [10, 50, 100, 100, 100, 100]
-    ], dtype=np.uint8)
-)
-cv.imwrite("./test_images/test_erroneous.jpg", 
-    np.array([
-    [1, 1, 1, 1, 5, 9],
-    [1, 5, 9, 9, 5, 1],
-    [9, 5, 1, 1, 1, 1]
-    ], dtype=np.uint8)
-)
 
-# Reimport the images
-p = cv.imread("./test_images/test_prediction.jpg")
-gt = cv.imread("./test_images/test_ground_truth.jpg")
-err = cv.imread("./test_images/test_erroneous.jpg")
 
-# Evaluate on predefined arrays
-print(f"""
-AbsRel: {abs_rel(p, gt)}
-RMSE: {rmse(p, gt)}
-DBE_acc: {dbe_accuracy(p, gt)}
-DBE_comp: {dbe_completeness(p, gt)}
-""")
 
-# Try errorneous examples
-# Should log skipping evaluation due to error
-abs_rel(p, err)
-rmse(err, gt)
-dbe_accuracy(p, err)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import List
 import debugpy
 from diffusers.pipelines.marigold.marigold_image_processing import MarigoldImageProcessor
-from ppd_sharpdepth.preprocessors import MarigoldPreProcessor
+from ppd_sharpdepth.depth_estimators import ModelArchitecture, get_depth_estimator_fn
+from ppd_sharpdepth.preprocessors import MarigoldPreProcessor, PixelPerfectDepthPreProcessor
 from ppd_sharpdepth.sharpdepth.util.alignment import align_depth_least_square
 
 import subprocess
@@ -395,6 +396,7 @@ if "__main__" == __name__:
     parser.add_argument("--dit_patch_encoder_lr_multiplier", type=float, default=0.01, help="Multiplier for the learning rate of the DiT patch encoder")
     parser.add_argument("--sds_loss_weight", type=float, default=1.0, help="Weight for the SDS loss")
     parser.add_argument("--blur_unidepth_output_ratio", type=int, default=1, help="Ratio of downscaling the unidepth output, for guidance, l1 error, and depth loss computation")
+    parser.add_argument("--noise_aware_latent_noise_scale", type=float, default=1.0, help="Scale for the noise aware latent noise. 0 means no noise, 1 means default behavior.")
 
     args = parser.parse_args()
 
@@ -799,7 +801,23 @@ if "__main__" == __name__:
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     student_denoiser.to(accelerator.device, dtype=weight_dtype)
 
-    base_depth_estimator_fn = get_base_depth_estimator_fn(args.base_model, accelerator.device, torch.bfloat16)
+    model_architecture = ModelArchitecture(args.base_model)
+
+    def get_checkpoint_from_model_architecture(model_architecture: ModelArchitecture) -> str:
+        match model_architecture:
+            case ModelArchitecture.unidepth:
+                return "lpiccinelli/unidepth-v1-vitl14"
+            case ModelArchitecture.depthanythingsmall:
+                return "LiheYoung/depth_anything_vits14"
+            case ModelArchitecture.depthanythinglarge:
+                return "LiheYoung/depth_anything_vitl14"
+            case ModelArchitecture.pixelperfectdepth:
+                return "andrew-healey/sharpdepth"
+            case _:
+                raise ValueError(f"Invalid model architecture: {model_architecture}")
+
+    base_model_checkpoint = get_checkpoint_from_model_architecture(model_architecture)
+    base_depth_estimator_fn = get_depth_estimator_fn(model_architecture, accelerator.device, torch.bfloat16, base_model_checkpoint)
 
 
     if args.use_ema:
@@ -950,7 +968,7 @@ if "__main__" == __name__:
     # and when it is, it might appear more times in one batch than another
 
     conditioning_kinds = ["no_cond","cond", "all"]
-    loss_keys = ["total","sds","depth","initial_depth","depth_mse","initial_depth_mse"]
+    loss_keys = ["total","sds","depth","initial_depth","depth_mse","initial_depth_mse","depth_aligned_mse"]
 
     # initialize EMA buffers at 0
     loss_exponential_moving_averages = { conditioning_kind: { loss_key: 0.0 for loss_key in loss_keys } for conditioning_kind in conditioning_kinds }
@@ -994,57 +1012,17 @@ if "__main__" == __name__:
 
                 rgb = batch["rgb_int"].to(weight_dtype) / 255.0
 
-                if sharpdepth_kind == SharpDepthKind.LOTUS:
-                    # don't resize
-
-                    rgb_float_1chw_resized, padding, original_resolution = MarigoldPreProcessor.run(batch["rgb_int"], device, weight_dtype)
-                    rgb_int_1chw_resized = (rgb_float_1chw_resized * 255.0).to(batch["rgb_int"].dtype)
-                    batch_resized = {
-                        "rgb_int": rgb_int_1chw_resized,
-                        "depth_raw_linear": None,
-                        "valid_mask_raw": None,
-                    }
-
-                    batch = batch_resized
-                    rgb = rgb_float_1chw_resized
-
-                elif sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
-
-                    rgb_float_hwc = rgb.squeeze(0).permute(1, 2, 0).cpu().float().numpy()
-                    resized_rgb_float_HpWpC = resize_keep_aspect(rgb_float_hwc)
-                    hp, wp, _ = resized_rgb_float_HpWpC.shape
-                    rgb_float_1chw_resized = torch.from_numpy(resized_rgb_float_HpWpC).permute(2, 0, 1).unsqueeze(0).to(device=rgb.device, dtype=rgb.dtype)
-                    rgb_int_1chw_resized = (rgb_float_1chw_resized * 255.0).to(batch["rgb_int"].dtype)
-
-#                    depth_raw_linear_11hw = batch["depth_raw_linear"]
-#                    depth_raw_linear_hw1 = batch["depth_raw_linear"].squeeze(0,1).unsqueeze(-1).cpu().numpy()
-#                    depth_raw_linear_hw1_resized = cv2_interpolate(depth_raw_linear_hw1, (wp, hp))
-#                    depth_raw_linear_11hw_resized = torch.from_numpy(depth_raw_linear_hw1_resized).squeeze(-1)[None,None,:,:].to(device=depth_raw_linear_11hw.device, dtype=depth_raw_linear_11hw.dtype)
-#
-#                    valid_mask_raw_11hw_bool = batch["valid_mask_raw"]
-#                    valid_mask_raw_hw1_float = batch["valid_mask_raw"].squeeze(0,1).unsqueeze(-1).cpu().float().numpy()
-#                    valid_mask_raw_hw1_float_resized = cv2_interpolate(valid_mask_raw_hw1_float, (wp, hp))
-#                    valid_mask_raw_11hw_bool_resized = torch.from_numpy(valid_mask_raw_hw1_float_resized).squeeze(-1)[None,None,:,:].to(device=valid_mask_raw_11hw_bool.device, dtype=valid_mask_raw_11hw_bool.dtype)
-#
-                    #batch_resized = {
-                    #    "rgb_int":          rgb_int_1chw_resized,
-                    #    "depth_raw_linear": depth_raw_linear_11hw_resized,
-                    #    "valid_mask_raw":   valid_mask_raw_11hw_bool_resized,
-                    #}
-                    batch_resized = {
-                        "rgb_int":          rgb_int_1chw_resized,
-                        "depth_raw_linear": None,
-                        "valid_mask_raw":   None,
-                    }
-
-                    batch = batch_resized
-                    rgb = rgb_float_1chw_resized
-
-                    padding = (0,0)
-
-                else:
-                    raise NotImplementedError(f"Image resizing not implemented for denoiser={sharpdepth_kind}")
-                
+                assert sharpdepth_kind in [SharpDepthKind.LOTUS, SharpDepthKind.PIXEL_PERFECT_DEPTH], f"Invalid sharpdepth kind: {sharpdepth_kind}"
+                preprocessor = MarigoldPreProcessor if sharpdepth_kind == SharpDepthKind.LOTUS else PixelPerfectDepthPreProcessor
+                rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(batch["rgb_int"], device, weight_dtype)
+                rgb_int_1chw_resized = (rgb_float_1chw_resized * 255.0).to(batch["rgb_int"].dtype)
+                batch_resized = {
+                    "rgb_int": rgb_int_1chw_resized,
+                    "depth_raw_linear": None,
+                    "valid_mask_raw": None,
+                }
+                batch = batch_resized
+                rgb = rgb_float_1chw_resized
 
                 ## UniDepth ##
 
@@ -1056,8 +1034,7 @@ if "__main__" == __name__:
                     # but it's in the original sharpdepth code, so we'll keep it.
                     # image, _, _ = pipeline.image_processor.preprocess(rgb, 768, "bilinear", accelerator.device)  # [N,3,PPH,PPW]
 
-                    rgb_int_1chw = (rgb * 255).to(torch.int32)
-                    disp_base = disp_base_11hw = base_depth_estimator_fn(rgb, rgb_int_1chw)
+                    disp_base = disp_base_11hw = base_depth_estimator_fn(og_batch["rgb_int"], preprocessor)
                     assert disp_base_11hw.shape[2:] == rgb.shape[2:], f"Base depth map doesn't match its input image resolution! disp_base_11hw.shape[2:] = {disp_base_11hw.shape[2:]}, rgb_float_1chw.shape[2:] = {rgb.shape[2:]}"
 
                 normalize_obj = depth_normalizer(disp_base)
@@ -1259,7 +1236,8 @@ if "__main__" == __name__:
                         if should_use_conditioning:
                             conditioning_kind = "cond"
                             x0 = norm_base_depth - 0.5
-                            noisy_depth_cond = norm_base_depth * (1 - l1_mask) + (torch.randn_like(x0) * l1_mask)
+                            scaled_l1_mask = l1_mask * args.noise_aware_latent_noise_scale
+                            noisy_depth_cond = (norm_base_depth - 0.5) * (1 - scaled_l1_mask) + (torch.randn_like(x0) * scaled_l1_mask)
                             xT = torch.randn_like(latent)
 
                             xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
@@ -1296,6 +1274,18 @@ if "__main__" == __name__:
                         maybe_blur(student_pred_depth_latent + 0.5), maybe_blur(x0 + 0.5), l1_error
                     )
                     depth_mse = F.mse_loss(student_pred_depth_latent + 0.5, x0 + 0.5, reduction="mean")
+
+                    with torch.no_grad():
+
+                        final_pred_depth_aligned, _, _ = align_depth_least_square(
+                            gt_arr=(x0 + 0.5).detach().float().cpu().numpy(),
+                            pred_arr=student_pred_depth.detach().float().cpu().numpy(),
+                            valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
+                            return_scale_shift=True,
+                            max_resolution=None,
+                        )
+                        final_pred_depth_aligned = torch.from_numpy(final_pred_depth_aligned).to(device)
+                        final_aligned_depth_mse = F.mse_loss(final_pred_depth_aligned, x0 + 0.5, reduction="mean")
 
                     # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
 
@@ -1414,6 +1404,7 @@ if "__main__" == __name__:
                                 default_processing_resolution=default_processing_resolution,
                                 default_denoising_steps=default_denoising_steps,
                                 sharpdepth_kind=sharpdepth_kind,
+                                base_depth_estimator_fn=base_depth_estimator_fn,
                             ).to(accelerator.device, dtype=weight_dtype)
                             with torch.no_grad():
                                 images = []
@@ -1432,8 +1423,9 @@ if "__main__" == __name__:
                                             .numpy()
                                             .astype(np.uint8)
                                         )
+                                        rgb_int_1chw = torch.from_numpy(np.array(rgb)).to(torch.int32).permute(2, 0, 1).unsqueeze(0)
                                         out = pipeline(
-                                            rgb, base_depth_estimator_fn, processing_res=768, denoising_steps=1
+                                            rgb_int_1chw, base_depth_estimator_fn, processing_res=768, denoising_steps=1
                                         )
 
                                         depth_pred = torch.from_numpy(out.depth_np).to(
@@ -1567,6 +1559,7 @@ if "__main__" == __name__:
                         "sds": (sds_loss.detach(), torch.tensor(1,device=sds_loss.device)),
                         "depth": (depth_loss.detach(), torch.tensor(1,device=depth_loss.device)),
                         "depth_mse": (depth_mse.detach(), torch.tensor(1,device=depth_mse.device)),
+                        "depth_aligned_mse": (final_aligned_depth_mse.detach(), torch.tensor(1,device=final_aligned_depth_mse.device)),
                         "initial_depth": (initial_depth_loss.detach() if initial_depth_loss is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_loss.device) if initial_depth_loss is not None else torch.tensor(0,device=device)),
                         "initial_depth_mse": (initial_depth_mse.detach() if initial_depth_mse is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_mse.device) if initial_depth_mse is not None else torch.tensor(0,device=device)),
                     },
@@ -1575,6 +1568,7 @@ if "__main__" == __name__:
                         "sds": (sds_loss.detach(), torch.tensor(1,device=sds_loss.device)),
                         "depth": (depth_loss.detach(), torch.tensor(1,device=depth_loss.device)),
                         "depth_mse": (depth_mse.detach(), torch.tensor(1,device=depth_mse.device)),
+                        "depth_aligned_mse": (final_aligned_depth_mse.detach(), torch.tensor(1,device=final_aligned_depth_mse.device)),
                         "initial_depth": (initial_depth_loss.detach() if initial_depth_loss is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_loss.device) if initial_depth_loss is not None else torch.tensor(0,device=device)),
                         "initial_depth_mse": (initial_depth_mse.detach() if initial_depth_mse is not None else torch.tensor(0,device=device), torch.tensor(1,device=initial_depth_mse.device) if initial_depth_mse is not None else torch.tensor(0,device=device)),
                     },

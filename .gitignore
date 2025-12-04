@@ -2,10 +2,11 @@ __pycache__
 /env
 *.ipynb
 /data
-/data2
+/preds
 /output
 /viz
 /train_output
 /checkpoints
 /wandb
+/patchrefiner/work_dir
 nohup.out
