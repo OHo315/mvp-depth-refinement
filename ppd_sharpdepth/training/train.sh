@@ -42,4 +42,5 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --use_conditioning_probability 0.8 \
     --dit_patch_encoder_lr_multiplier 0.01 \
     --blur_unidepth_output_ratio 32 \
+    --noise_aware_latent_noise_scale 0.5 \
     "$@"

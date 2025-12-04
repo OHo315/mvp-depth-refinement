@@ -64,6 +64,8 @@ from ppd_sharpdepth.sharpdepth.util.logging_util import config_logging
 from ppd_sharpdepth.sharpdepth.util.normalizer import ScaleShiftNormalizer
 from ppd_sharpdepth.ppd.models.ppd import PixelPerfectDepth
 
+import torchvision.transforms.functional as TV_F
+
 import wandb
 
 logger = get_logger(__name__)
@@ -1215,8 +1217,8 @@ if "__main__" == __name__:
                         def blur(x_11hw, scale_factor):
                             small_h = x_11hw.shape[2] // scale_factor
                             small_w = x_11hw.shape[3] // scale_factor
-                            downscaled = F.resize(x_11hw, size=(small_h, small_w), mode="bilinear", align_corners=False)
-                            upscaled = F.resize(downscaled, size=(x_11hw.shape[2], x_11hw.shape[3]), mode="bilinear", align_corners=False)
+                            downscaled = TV_F.resize(x_11hw, size=(small_h, small_w), interpolation=TV_F.InterpolationMode.BILINEAR)
+                            upscaled = TV_F.resize(downscaled, size=(x_11hw.shape[2], x_11hw.shape[3]), interpolation=TV_F.InterpolationMode.BILINEAR)
                             return upscaled
                         
                         def maybe_blur(x_11hw):
