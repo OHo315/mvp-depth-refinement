@@ -1301,7 +1301,7 @@ if "__main__" == __name__:
 
                             l1_error_colored = colorize_internal(maybe_blur(l1_error).cpu().numpy(), 0, 1, cmap="coolwarm")
                             l1_error_colored.save("/tmp/viz/l1_error.png")
-                            print("l1_error.min(), l1_error.max()", l1_error.min().item(), l1_error.max().item())
+                            # print("l1_error.min(), l1_error.max()", l1_error.min().item(), l1_error.max().item())
 
                             weighted_sds_score = (sds_score - maybe_blur(sds_score)).abs() * ((1-maybe_blur(l1_error))**2)
                             weighted_sds_score_colored = colorize_internal(weighted_sds_score.cpu().numpy(), weighted_sds_score.min().item(), weighted_sds_score.max().item(), cmap="Greys")
