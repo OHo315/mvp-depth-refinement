@@ -54,7 +54,7 @@ class HypersimDataset(BaseDepthDataset):
         scene = rgb_rel_path.split("/")[0]
         scene_intrisincs = self.intrinsics_df.loc[scene]
         fx, fy, cx, cy = (
-            scene_intrisincs["M_proj_01"],
+            scene_intrisincs["M_proj_00"],
             scene_intrisincs["M_proj_11"],
             scene_intrisincs["M_proj_02"],
             scene_intrisincs["M_proj_12"],
