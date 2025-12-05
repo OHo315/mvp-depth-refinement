@@ -448,11 +448,6 @@ def get_depth_estimator_fn(
                     'patch_split_num': (2, 2),
                 }
 
-                # Debug
-                tiles = patchrefiner.prepare_tiles(rgb_float_1chw_resized, tile_cfg)  # hypothetical helper
-                for i, t in enumerate(tiles):
-                    print(f"Tile {i}: {t.shape}")
-
                 ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized, tile_cfg=tile_cfg, cai_mode="m2")
 
                 return ret_11hw
