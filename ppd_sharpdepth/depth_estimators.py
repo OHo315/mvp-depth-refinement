@@ -408,12 +408,14 @@ def get_depth_estimator_fn(
             # This step is done within PatchRefiner.from_pretrained()
             # Load coarse branch checkpoint first
             coarse_ckpt = torch.load(COARSE_CHECKPOINT, map_location='cpu', weights_only=False)
-            patchrefiner.coarse_branch.load_state_dict(coarse_ckpt["model_state_dict"], strict=True)
+            #print(f"Coarse checkpoint patch_process_shape: {coarse_ckpt['model_state_dict'].keys()}")
+            patchrefiner.coarse_branch.load_state_dict(coarse_ckpt['model_state_dict'], strict=True)
             print("Coarse branch loaded!")
 
             # Load fine branch checkpoint
             fine_ckpt = torch.load(FINE_CHECKPOINT, weights_only=False)
-            patchrefiner.load_state_dict(fine_ckpt["model_state_dict"], strict=False)
+            #print(f"Fine checkpoint patch_process_shape: {fine_ckpt['model_state_dict']['tile_cfg']}")
+            patchrefiner.load_state_dict(fine_ckpt['model_state_dict'], strict=False)
             print("Fine branch loaded!")
 
             print(f"PATCH_SHAPE: {patchrefiner.patch_process_shape}")
@@ -442,13 +444,18 @@ def get_depth_estimator_fn(
                 ret_11hw = patchrefiner.infer_forward(rgb_float_1chw_resized, None, tile_temp, coarse_temp_dict)
                 """
                 print(f"RGB_SHAPE: {rgb_float_1chw_resized.shape}")
+
+                # Upscale image to match default tile_cfg
+                rgb_float_1chw_resized = F.interpolate(rgb_float_1chw_resized, size=(2160, 3840), mode="bilinear", align_corners=False)
+                """
                 _, _, H, W = rgb_float_1chw_resized.shape
                 tile_cfg = {
                     'image_raw_shape': (H, W),
                     'patch_split_num': (2, 2),
                 }
+                """
 
-                ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized, tile_cfg=tile_cfg, cai_mode="m2")
+                ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized, cai_mode="m4") #, tile_cfg=tile_cfg, process_num=1)
 
                 return ret_11hw
             
