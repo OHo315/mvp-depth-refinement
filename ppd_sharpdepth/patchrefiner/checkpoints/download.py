@@ -14,7 +14,7 @@ def download():
         None
     """
     #file_id = "1X_XZVzo55imXzjkZSa5dHDrqDIHUZlc1" # Google Drive file ID
-    output_dir = "./ppd_sharpdepth/patchrefiner/checkpointstest"
+    output_dir = "./ppd_sharpdepth/patchrefiner/checkpoints"
 
     # Ensure the directory exists
     os.makedirs(output_dir, exist_ok=True)
