@@ -1,14 +1,3 @@
-,Unnamed: 0.14,Unnamed: 0.13,Unnamed: 0.12,Unnamed: 0.11,Unnamed: 0.10,Unnamed: 0.9,Unnamed: 0.8,Unnamed: 0.7,Unnamed: 0.6,Unnamed: 0.5,Unnamed: 0.4,Unnamed: 0.3,Unnamed: 0.2,Unnamed: 0.1,Unnamed: 0,id,gitname,model_architecture,preds_dataset,run_message,abs_rel,rmse,dbe
-0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,,,,0,anthonyceponis,unidepth,nyu_v2_processed,test,0.0337923414347174,0.1890767305345997,0.0124723523877053
-1,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0.0,,,,,1,anthonyceponis,pixelperfectdepth,nyu_v2_processed,ppd to check dbe with andrew on call,1.752208010495508,6.236155101535079,0.0263628562498291
-2,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,0.0,,,,,,2,anthonyceponis,unidepth,nyu_v2_processed,unidepth dbe with andrew on call,0.0337923414347174,0.1890767305345997,0.0124723523877053
-3,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,0.0,,,,,,,3,anthonyceponis,unidepth,middlebury_processed,Unidepth dbe on middlebury with andrew on call,0.364894984254188,2.972869861627107,5.4018025883257794e-05
-4,4.0,4.0,4.0,4.0,4.0,4.0,4.0,0.0,,,,,,,,4,anthonyceponis,pixelperfectdepth,middlebury_processed,ppd on middlebury for dbe with andrew on call,1.4061527959390576,4.186395986885134,0.0993696039425319
-5,5.0,5.0,5.0,5.0,5.0,5.0,0.0,,,,,,,,,5,anthonyceponis,unidepth,middlebury_processed,dsafdsaf,0.364894984254188,2.972869861627107,5.4018025883257794e-05
-6,6.0,6.0,6.0,6.0,6.0,0.0,,,,,,,,,,6,anthonyceponis,unidepth,middlebury_processed,safdsaf,0.364894984254188,2.972869861627107,5.4018025883257794e-05
-7,7.0,7.0,7.0,7.0,0.0,,,,,,,,,,,7,anthonyceponis,depthanythingsmall,middlebury_processed,dsafsad,1.4577011875592565,4.658955433996936,0.0221447882103733
-8,8.0,8.0,8.0,0.0,,,,,,,,,,,,8,anthonyceponis,unidepth,middlebury_processed,safdsaf,0.364894984254188,2.972869861627107,5.4018025883257794e-05
-9,9.0,9.0,0.0,,,,,,,,,,,,,9,anthonyceponis,pixelperfectdepth,middlebury_processed,sadfsadf,1.4086002797775057,4.197619224526648,0.0974263864486894
-10,10.0,0.0,,,,,,,,,,,,,,10,anthonyceponis,unidepth,nyu_v2_processed,safsad,0.0337923414347174,0.1890767305345997,0.0124723523877053
-11,0.0,,,,,,,,,,,,,,,11,anthonyceponis,pixelperfectdepth,nyu_v2_processed,safdds,1.7543874443803853,6.23812862562668,0.0271416826258265
-0,,,,,,,,,,,,,,,,12,anthonyceponis,pixelperfectdepth,nyu_v2_processed,dsafasd,0.04521913153242304,0.25365934238765137,0.051539540948888574
+id,gitname,model_architecture,preds_dataset,run_message,abs_rel,rmse,ppd
+0,anthonyceponis,unidepth,hypersim_processed/test,dsaf,0.2648989695997994,2.88898605713861,483.2563929721934
+1,anthonyceponis,pixelperfectdepth,hypersim_processed/test,sfad,0.2540301388469923,2.7230144584991236,475.0534697010928

@@ -40,6 +40,7 @@ from .base_iid_dataset import BaseIIDDataset  # noqa: F401
 from .base_normals_dataset import BaseNormalsDataset  # noqa: F401
 from .diode_dataset import DIODEDepthDataset, DIODENormalsDataset
 from .eth3d_dataset import ETH3DDepthDataset
+#from ppd_sharpdepth.sharpdepth.data.datasets_and_samplers.hypersim_dataset import HypersimDataset 
 from .hypersim_dataset import (
     HypersimDepthDataset,
     HypersimNormalsDataset,

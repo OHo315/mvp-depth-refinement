@@ -110,33 +110,27 @@ if "__main__" == __name__:
         save_path = output_dir / rgb_name
         os.makedirs(save_path.parent, exist_ok=True)
         np.save(save_path, depth_np_11hw)
-
-        # Clip to dataset min max
-        depth_np_11hw = np.clip(
-            depth_np_11hw, a_min=dataset.min_depth, a_max=dataset.max_depth
-        )
-        # clip to d > 0 for evaluation
-        depth_np_11hw = np.clip(depth_np_11hw, a_min=1e-6, a_max=None)
-
+ 
         depth_np_11hw = np.squeeze(depth_np_11hw)
-        depth_np_11hw *= valid_mask 
 
-        # Generate color maps
+        depth_np_11hw_valid = depth_np_11hw * valid_mask
+        depth_raw_valid = depth_raw * valid_mask
 
-        depth_colored = colorize_depth_maps(depth_raw, 0, depth_raw.max(), cmap=color_map).squeeze()
+        depth_maps = {
+            "pred_raw": depth_np_11hw,
+            "label_raw": depth_raw,
+            "pred_valid": depth_np_11hw_valid,
+            "label_valid": depth_raw_valid,
+        }
 
-        depth_colored = (depth_colored * 255).astype(np.uint8)
-        depth_colored_hwc = chw2hwc(depth_colored)
-        depth_label_colored_img = Image.fromarray(depth_colored_hwc)
+        # Generate and save color maps.
+        for variant, depth_map in depth_maps.items():
+            depth_colored = colorize_depth_maps(depth_map, 0, depth_map.max(), cmap=color_map).squeeze()
+            depth_colored = (depth_colored * 255).astype(np.uint8)
+            depth_colored_hwc = chw2hwc(depth_colored)
+            depth_label_colored_img = Image.fromarray(depth_colored_hwc)
 
-        depth_colored = colorize_depth_maps(depth_np_11hw, 0, depth_np_11hw.max(), cmap=color_map).squeeze()
-
-        depth_colored = (depth_colored * 255).astype(np.uint8)
-        depth_colored_hwc = chw2hwc(depth_colored)
-        depth_pred_colored_img = Image.fromarray(depth_colored_hwc) 
-
-        depth_label_colored_img.save(f"{save_path.parent}/{save_path.stem}_depth_label.png")
-        depth_pred_colored_img.save(f"{save_path.parent}/{save_path.stem}_depth_pred.png")
+            depth_label_colored_img.save(f"{save_path.parent}/{save_path.stem}_depth_{variant}.png")
     
     print(f"successfully saved outputs.")
 

@@ -30,9 +30,11 @@
 
 import torch
 
-from .base_depth_dataset import BaseDepthDataset, DepthFileNameMode
+from .base_depth_dataset import BaseDepthDataset, DepthFileNameMode, DatasetMode
 from .base_normals_dataset import BaseNormalsDataset
 from .base_iid_dataset import BaseIIDDataset
+import os
+import pandas as pd
 
 
 class HypersimDepthDataset(BaseDepthDataset):
@@ -49,11 +51,58 @@ class HypersimDepthDataset(BaseDepthDataset):
             **kwargs,
         )
 
+        BASE_DATA_DIR = os.environ["BASE_DATA_DIR"]
+        intrinsics_filepath = f"{BASE_DATA_DIR}/../data_split/hypersim_normals/metadata_camera_parameters.csv"
+
+        self.intrinsics_df = pd.read_csv(intrinsics_filepath).set_index("scene_name")
+
+
     def _read_depth_file(self, rel_path):
         depth_in = self._read_image(rel_path)
         # Decode Hypersim depth
         depth_decoded = depth_in / 1000.0
         return depth_decoded
+
+    def _get_data_item(self, index):
+        rgb_rel_path, depth_rel_path, filled_rel_path = self._get_data_path(index=index)
+
+        rasters = {}
+        # RGB data
+        rasters.update(self._load_rgb_data(rgb_rel_path=rgb_rel_path))
+
+        # Depth data
+        if DatasetMode.RGB_ONLY != self.mode:
+            # load data
+            depth_data = self._load_depth_data(
+                depth_rel_path=depth_rel_path, filled_rel_path=filled_rel_path
+            )
+            rasters.update(depth_data)
+            # valid mask
+            rasters["valid_mask_raw"] = self._get_valid_mask(
+                rasters["depth_raw_linear"]
+            ).clone()
+            rasters["valid_mask_filled"] = self._get_valid_mask(
+                rasters["depth_filled_linear"]
+            ).clone()
+
+
+        scene = rgb_rel_path.split("/")[0]
+        scene_intrisincs = self.intrinsics_df.loc[scene]
+        fx, fy, cx, cy = (
+            scene_intrisincs["M_proj_00"],
+            scene_intrisincs["M_proj_11"],
+            scene_intrisincs["M_proj_02"],
+            scene_intrisincs["M_proj_12"],
+        )
+        intrinsics = torch.tensor([[fx, 0, cx], [0, fy, cy], [0, 0, 1]]).float()
+        other = {
+            "index": index,
+            "rgb_relative_path": rgb_rel_path,
+            "disp_name": self.disp_name,
+            "intrinsics": intrinsics,
+        }
+ 
+        return rasters, other
 
 
 class HypersimNormalsDataset(BaseNormalsDataset):
