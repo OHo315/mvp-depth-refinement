@@ -408,7 +408,7 @@ def get_depth_estimator_fn(
             # This step is done within PatchRefiner.from_pretrained()
             # Load coarse branch checkpoint first
             coarse_ckpt = torch.load(COARSE_CHECKPOINT, map_location='cpu', weights_only=False)
-            patchrefiner.coarse_branch.load_state_dict(coarse_ckpt, strict=True)
+            patchrefiner.coarse_branch.load_state_dict(coarse_ckpt["model_state_dict"], strict=True)
             print("Coarse branch loaded!")
 
             # Load fine branch checkpoint
