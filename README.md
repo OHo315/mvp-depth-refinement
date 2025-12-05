@@ -38,3 +38,9 @@ Verify the image is built and on your system using `sudo docker images`
 Push image to docker hub using `sudo docker push <docker_username>/<image_name>:latest`
 
 
+### Inference with PatchRefiner
+
+This is a hard-coded temporary fix for running inference on PatchRefiner:
+After setting up using `source ./setup.sh`, replace `env/lib/python3.13/site-packages/mmengine/registry/registry.py` with `ppd_sharpdepth/patchrefiner/hardcode_changes/registry.py`.
+
+Sometimes, you may reach a RuntimeError stating there is an error in `loading state_dict for DPTDepthModel` and there are `Unexpected key(s) in state_dict` (all ending in `relative_position_index`). If this occurs, please ensure that the `timm` version is `0.9.2`, since newer versions will not match the `state_dict` keys correctly.
