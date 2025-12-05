@@ -41,7 +41,7 @@ class MiddleburyDepthDataset(BaseDepthDataset):
     ) -> None:
         super().__init__(
             # Middlebury dataset parameter
-            # NOTE: These are copied from NYU with the intuition that they are both indoor datasets. Not sure how they were actually derived.
+            # NOTE: These values are copied from nyu. 
             min_depth=1e-3,
             max_depth=10.0,
             has_filled_depth=False,  # our depths are raw and do not have filled in holes as a result of sensor measurements, like in NYU.
