@@ -45,12 +45,12 @@
 #	--dataset_config_path config/dataset_depth/data_hypersim_test.yaml \
 #	--model_architecture unidepth
 
-python -m ppd_sharpdepth.infer \
-	--checkpoint "andrew-healey/sharpdepth" \
-	--dataset_config_path config/dataset_depth/data_hypersim_test.yaml \
-	--model_architecture pixelperfectdepth
-
 #python -m ppd_sharpdepth.infer \
-#	--checkpoint "OHo315/PatchRefiner" \
-#	--dataset_config_path config/dataset_depth/data_nyu_test.yaml \
-#	--model_architecture patchrefiner
+#	--checkpoint "andrew-healey/sharpdepth" \
+#	--dataset_config_path config/dataset_depth/data_hypersim_test.yaml \
+#	--model_architecture pixelperfectdepth
+
+python -m ppd_sharpdepth.infer \
+	--checkpoint "OHo315/PatchRefiner" \
+	--dataset_config_path config/dataset_depth/data_nyu_test.yaml \
+	--model_architecture patchrefiner
