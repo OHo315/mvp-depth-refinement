@@ -77,7 +77,7 @@ model=dict(
         min_depth=1e-3,
         max_depth=80,
 
-        pretrain_coarse_model='./work_dir/zoedepth/u4k/coarse_pretrain/checkpoint_24.pth', # will load the coarse model     
+        pretrain_coarse_model='./ppd_sharpdepth/patchrefiner/checkpoints/work_dir/zoedepth/u4k/coarse_pretrain/checkpoint_24.pth', # will load the coarse model     
         strategy_refiner_target='offset_coarse',
         
         coarse_branch=zoe_depth_config,

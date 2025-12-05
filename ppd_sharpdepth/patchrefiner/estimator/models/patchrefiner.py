@@ -74,7 +74,7 @@ class PatchRefiner(BaselinePretrain, PyTorchModelHubMixin):
         self.tile_cfg = self.prepare_tile_cfg(config.image_raw_shape, config.patch_split_num)
         
         # process coarse model
-        if config.coarse_branch.type == 'ZoeDepth':
+        if config.coarse_branch["type"] == 'ZoeDepth':
             self.coarse_branch = ZoeDepth.build(**config.coarse_branch)
             print_log("Current zoedepth.core.prep.resizer is {}".format(type(self.coarse_branch.core.prep.resizer)), logger='current')
             if config.pretrain_coarse_model is not None:
@@ -82,7 +82,7 @@ class PatchRefiner(BaselinePretrain, PyTorchModelHubMixin):
                 print_log(self.coarse_branch.load_state_dict(torch.load(config.pretrain_coarse_model, map_location='cpu')['model_state_dict'], strict=True), logger='current') # coarse ckp
             self.resizer = ResizeZoe(self.patch_process_shape[1], self.patch_process_shape[0], keep_aspect_ratio=False, ensure_multiple_of=32, resize_method="minimal")
             
-        elif config.coarse_branch.type == 'DA-ZoeDepth':
+        elif config.coarse_branch["type"] == 'DA-ZoeDepth':
             self.coarse_branch = ZoeDepth.build(**config.coarse_branch)
             print_log("Current zoedepth.core.prep.resizer is {}".format(type(self.coarse_branch.core.prep.resizer)), logger='current')
             if config.pretrain_coarse_model is not None:
@@ -94,13 +94,13 @@ class PatchRefiner(BaselinePretrain, PyTorchModelHubMixin):
             param.requires_grad = False
         
         # process fine model
-        if config.refiner.fine_branch.type == 'ZoeDepth':
-            self.refiner_fine_branch = ZoeDepth.build(**config.refiner.fine_branch)
+        if config.refiner["fine_branch"]["type"] == 'ZoeDepth':
+            self.refiner_fine_branch = ZoeDepth.build(**config.refiner["fine_branch"])
             print_log("Current zoedepth.core.prep.resizer is {}".format(type(self.refiner_fine_branch.core.prep.resizer)), logger='current')
             print_log("Hacking refiner_fine_branch (copy weights from the coarse one)", logger='current')
             self.refiner_fine_branch.load_state_dict(self.coarse_branch.state_dict(), strict=True) # overload model
-        elif config.refiner.fine_branch.type == 'DA-ZoeDepth':
-            self.refiner_fine_branch = ZoeDepth.build(**config.refiner.fine_branch)
+        elif config.refiner["fine_branch"]["type"] == 'DA-ZoeDepth':
+            self.refiner_fine_branch = ZoeDepth.build(**config.refiner["fine_branch"])
             print_log("Current zoedepth.core.prep.resizer is {}".format(type(self.refiner_fine_branch.core.prep.resizer)), logger='current')
             print_log("Hacking refiner_fine_branch (copy weights from the coarse one)", logger='current')
             self.refiner_fine_branch.load_state_dict(self.coarse_branch.state_dict(), strict=True) # overload model

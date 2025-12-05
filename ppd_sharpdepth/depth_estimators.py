@@ -389,9 +389,9 @@ def get_depth_estimator_fn(
         case ModelArchitecture.patchrefiner:
             from .patchrefiner.estimator.models.patchrefiner import PatchRefiner
 
-            CONFIG = "./patchrefiner/configs/pr_u4k.py"
-            COARSE_CHECKPOINT = "./patchrefiner/checkpoints/work_dir/zoedepth/u4k/coarse_pretrain/checkpoint_24.pth"
-            FINE_CHECKPOINT = "./patchrefiner/checkpoints/work_dir/zoedepth/u4k/pr/checkpoint_36.pth"
+            CONFIG = "./ppd_sharpdepth/patchrefiner/configs/patchrefiner_zoedepth/pr_u4k.py"
+            COARSE_CHECKPOINT = "./ppd_sharpdepth/patchrefiner/checkpoints/work_dir/zoedepth/u4k/coarse_pretrain/checkpoint_24.pth"
+            FINE_CHECKPOINT = "./ppd_sharpdepth/patchrefiner/checkpoints/work_dir/zoedepth/u4k/pr/checkpoint_36.pth"
             
             if not (os.path.exists(COARSE_CHECKPOINT) and os.path.exists(FINE_CHECKPOINT)):
                 print("Checkpoint files are missing: Downloading...")
