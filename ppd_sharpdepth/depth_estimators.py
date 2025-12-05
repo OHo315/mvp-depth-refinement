@@ -416,6 +416,8 @@ def get_depth_estimator_fn(
             patchrefiner.load_state_dict(fine_ckpt["model_state_dict"], strict=False)
             print("Fine branch loaded!")
 
+            print(f"PATCH_SHAPE: {patchrefiner.patch_process_shape}")
+
             # Change to eval mode
             patchrefiner.eval()
             print("Switched to eval mode!")
@@ -439,7 +441,19 @@ def get_depth_estimator_fn(
 
                 ret_11hw = patchrefiner.infer_forward(rgb_float_1chw_resized, None, tile_temp, coarse_temp_dict)
                 """
-                ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized)
+                print(f"RGB_SHAPE: {rgb_float_1chw_resized.shape}")
+                _, _, H, W = rgb_float_1chw_resized.shape
+                tile_cfg = {
+                    'image_raw_shape': (H, W),
+                    'patch_split_num': (2, 2),
+                }
+
+                # Debug
+                tiles = patchrefiner.prepare_tiles(rgb_float_1chw_resized, tile_cfg)  # hypothetical helper
+                for i, t in enumerate(tiles):
+                    print(f"Tile {i}: {t.shape}")
+
+                ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized, tile_cfg=tile_cfg, cai_mode="m2")
 
                 return ret_11hw
             
