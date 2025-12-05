@@ -402,15 +402,17 @@ def get_depth_estimator_fn(
 
             # Build the model
             patchrefiner = PatchRefiner(cfg.model.config)
+            #patchrefiner = PatchRefiner.from_pretrained(cfg.model.config)
             print("Model instantiated!")
 
+            # This step is done within PatchRefiner.from_pretrained()
             # Load coarse branch checkpoint first
-            coarse_ckpt = torch.load(COARSE_CHECKPOINT, map_location='cpu')
+            coarse_ckpt = torch.load(COARSE_CHECKPOINT, map_location='cpu', weights_only=False)
             patchrefiner.coarse_branch.load_state_dict(coarse_ckpt, strict=True)
             print("Coarse branch loaded!")
 
             # Load fine branch checkpoint
-            fine_ckpt = torch.load(FINE_CHECKPOINT)
+            fine_ckpt = torch.load(FINE_CHECKPOINT, weights_only=False)
             patchrefiner.load_state_dict(fine_ckpt["model_state_dict"], strict=False)
             print("Fine branch loaded!")
 

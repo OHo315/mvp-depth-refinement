@@ -79,7 +79,7 @@ class PatchRefiner(BaselinePretrain, PyTorchModelHubMixin):
             print_log("Current zoedepth.core.prep.resizer is {}".format(type(self.coarse_branch.core.prep.resizer)), logger='current')
             if config.pretrain_coarse_model is not None:
                 print_log("Loading coarse_branch from {}".format(config.pretrain_coarse_model), logger='current')
-                print_log(self.coarse_branch.load_state_dict(torch.load(config.pretrain_coarse_model, map_location='cpu')['model_state_dict'], strict=True), logger='current') # coarse ckp
+                print_log(self.coarse_branch.load_state_dict(torch.load(config.pretrain_coarse_model, map_location='cpu', weights_only=False)['model_state_dict'], strict=True), logger='current') # coarse ckp
             self.resizer = ResizeZoe(self.patch_process_shape[1], self.patch_process_shape[0], keep_aspect_ratio=False, ensure_multiple_of=32, resize_method="minimal")
             
         elif config.coarse_branch["type"] == 'DA-ZoeDepth':
@@ -87,7 +87,7 @@ class PatchRefiner(BaselinePretrain, PyTorchModelHubMixin):
             print_log("Current zoedepth.core.prep.resizer is {}".format(type(self.coarse_branch.core.prep.resizer)), logger='current')
             if config.pretrain_coarse_model is not None:
                 print_log("Loading coarse_branch from {}".format(config.pretrain_coarse_model), logger='current')
-                print_log(self.coarse_branch.load_state_dict(torch.load(config.pretrain_coarse_model, map_location='cpu')['model_state_dict'], strict=True), logger='current') # coarse ckp
+                print_log(self.coarse_branch.load_state_dict(torch.load(config.pretrain_coarse_model, map_location='cpu', weights_only=False)['model_state_dict'], strict=True), logger='current') # coarse ckp
             self.resizer = ResizeDA(self.patch_process_shape[1], self.patch_process_shape[0], keep_aspect_ratio=False, ensure_multiple_of=14, resize_method="minimal")
             
         for param in self.coarse_branch.parameters():
@@ -108,11 +108,11 @@ class PatchRefiner(BaselinePretrain, PyTorchModelHubMixin):
         self.sigloss = build_model(config.sigloss) # here
 
         self.fusion_feat_level = config.fusion_feat_level
-        self.refiner_fusion_model = build_model(config.refiner.fusion_model) # FusionUnet(input_chl=self.update_feat_chl, temp_chl=[32, 256, 256], dec_chl=[256, 32])
+        self.refiner_fusion_model = build_model(config.refiner["fusion_model"]) # FusionUnet(input_chl=self.update_feat_chl, temp_chl=[32, 256, 256], dec_chl=[256, 32])
         self.strategy_refiner_target = config.strategy_refiner_target
 
         if config.pretrained is not None:
-            pretrained_dict = torch.load(config.pretrained, map_location='cpu')['model_state_dict']
+            pretrained_dict = torch.load(config.pretrained, map_location='cpu', weights_only=False)['model_state_dict']
             updated_dict = {}
             for k, v in pretrained_dict.items():
                 if config.load_whole:
