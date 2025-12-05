@@ -318,7 +318,7 @@ class SharpDepthPipeline(DiffusionPipeline):
             with torch.autocast(self.device.type,dtype=self.unet.dtype):
                 semantics = self.unet.semantics_prompt(rgb_float_1chw_resized)
                 latent = noise
-                cond_noise = torch.randn_like(latent)
+                cond_noise = torch.randn_like(latent) # norm_base_depth - 0.5 # 
                 for timestep in self.unet.sampling_timesteps:
                     input = torch.cat([latent, cond, maybe_blur(cond_noise)], dim=1)
                     pred = self.unet.dit(x=input, semantics=semantics, timestep=timestep)
