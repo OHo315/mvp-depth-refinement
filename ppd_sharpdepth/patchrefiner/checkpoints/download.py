@@ -13,13 +13,20 @@ def download():
     Returns:
         None
     """
+
+    """
+    # Enable parallel downloads
+    subprocess.run(["pip", "install", "hf_transfer"])
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+    """
+    
     #file_id = "1X_XZVzo55imXzjkZSa5dHDrqDIHUZlc1" # Google Drive file ID
     output_dir = "./ppd_sharpdepth/patchrefiner/checkpoints"
 
     # Ensure the directory exists
     os.makedirs(output_dir, exist_ok=True)
 
-    zip_path = os.path.join(output_dir, "download.zip")
+    download_to = os.path.join(output_dir, "download")
 
     """
     # Download the zip file from google drive
@@ -45,13 +52,15 @@ def download():
 
     # Download the zip file from hugging_face
     hf_id = "OHo315/PatchRefinerCheckpoint"
-    if os.path.exists(zip_path):
+    if os.path.exists(download_to):
         print(f"Zip file exists already. Skipping download.")
     else:
         print("Downloading zip file...")
-        snapshot_download(repo_id=hf_id, cache_dir=zip_path)
+        snapshot_download(repo_id=hf_id, cache_dir=download_to, repo_type="dataset")
         print("Download complete!")
         return
+    
+    zip_path = os.path.join(download_to, "download.zip")
 
     print("Extracting ZIP...")
     if not zipfile.is_zipfile(zip_path):
