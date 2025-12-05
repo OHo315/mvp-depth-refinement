@@ -14,7 +14,7 @@ gradient_accumulation_steps=$((macrobatch_size / num_gpus))
     # --student_ckpt_dir_revision blurred \
     # --student_ckpt_dir_revision identity_no_sds \
 accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
-    --sds_loss_weight 1.0 \
+    --sds_loss_weight 0.1 \
     --depth_weight 0.4 \
     --base_ckpt_dir andrew-healey/sharpdepth \
     --student_ckpt_dir andrew-healey/sharpdepth \
@@ -23,7 +23,7 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --mixed_precision bf16 \
     --seed 42 \
     --allow_tf32 \
-    --learning_rate 1e-5 \
+    --learning_rate 5e-5 \
     --lr_scheduler cosine \
     --lr_warmup_steps 100 \
     --tracker_project_name ppd_sharpdepth_train \

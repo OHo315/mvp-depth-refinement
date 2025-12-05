@@ -1281,7 +1281,7 @@ if "__main__" == __name__:
                     high_freq_sds_loss = (score_vector - maybe_blur(score_vector)).abs() * ((1-maybe_blur(l1_error))**2)
                     sds_loss = 0.5 * F.mse_loss(student_pred_depth_latent, high_freq_sds_loss.detach(), reduction="mean")
 
-                    if accelerator.is_main_process:
+                    if accelerator.is_main_process and False:
                         with torch.no_grad():
 
                             os.makedirs("/tmp/viz", exist_ok=True)
