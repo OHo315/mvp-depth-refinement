@@ -428,9 +428,18 @@ def get_depth_estimator_fn(
                 
                 rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
 
-                ret_11hw = patchrefiner.infer(
-                    (rgb_float_1chw_resized * 255).squeeze().int()
-                )["depth"]
+                #rgb_int_1chw_resized = (rgb_float_1chw_resized * 255).int()
+                # Expects a float tensor
+                """
+                tile_temp = {}
+                coarse_temp_dict = {
+                    'coarse_depth_roi': torch.zeros(1, 1, rgb_float_1chw_resized.shape[2], rgb_float_1chw_resized.shape[3], device=device),
+                    'coarse_feats_roi': torch.zeros(1, rgb_float_1chw_resized.shape[1], rgb_float_1chw_resized.shape[2], rgb_float_1chw_resized.shape[3], device=device)
+                }
+
+                ret_11hw = patchrefiner.infer_forward(rgb_float_1chw_resized, None, tile_temp, coarse_temp_dict)
+                """
+                ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized)
 
                 return ret_11hw
             
