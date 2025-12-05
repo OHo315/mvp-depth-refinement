@@ -1,4 +1,5 @@
 #!/bin/bash
+pip install unzip
 
 bash ./script/data_fetch/hypersim-hf.sh
 bash ./script/data_fetch/nyu.sh
