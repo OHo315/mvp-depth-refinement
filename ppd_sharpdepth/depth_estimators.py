@@ -455,7 +455,7 @@ def get_depth_estimator_fn(
                 print(f"RGB_SHAPE: {rgb_float_1chw_resized.shape}")
 
                 # Upscale image to match default tile_cfg
-                rgb_float_1chw_resized = F.interpolate(rgb_float_1chw_resized, size=(1080, 1920), mode="bilinear", align_corners=False)
+                #rgb_float_1chw_resized = F.interpolate(rgb_float_1chw_resized, size=(1080, 1920), mode="bilinear", align_corners=False)
                 _, _, H, W = rgb_float_1chw_resized.shape
                 tile_cfg = {
                     'image_raw_shape': (H, W),
