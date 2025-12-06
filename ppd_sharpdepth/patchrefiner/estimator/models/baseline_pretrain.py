@@ -314,7 +314,7 @@ class BaselinePretrain(nn.Module):
         for h_start in h_start_list_process:
             for w_start in w_start_list_process:
                 temp_depth = predictions[patch_select_idx]
-                temp_depth = F.interpolate(temp_depth, size=self.patch_prcoess_shape, mode="bilinear", align_corners=False)
+                temp_depth = F.interpolate(temp_depth, size=self.patch_process_shape, mode="bilinear", align_corners=False)
                 
                 if init_flag:
                     count_map[h_start: h_start+self.patch_process_shape[0], w_start: w_start+self.patch_process_shape[1]] = blur_mask
