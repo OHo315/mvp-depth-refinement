@@ -4,7 +4,7 @@ import requests
 import zipfile
 #import gdown
 import subprocess
-from huggingface_hub import snapshot_download
+from huggingface_hub import hf_hub_download
 
 def download():
     """
@@ -26,7 +26,7 @@ def download():
     # Ensure the directory exists
     os.makedirs(output_dir, exist_ok=True)
 
-    download_to = os.path.join(output_dir, "download")
+    download_to = os.path.join(output_dir)
 
     """
     # Download the zip file from google drive
@@ -49,18 +49,17 @@ def download():
         header = f.read(4)
         print(header)
     """
+    zip_path = os.path.join(output_dir, "download.zip")
 
     # Download the zip file from hugging_face
     hf_id = "OHo315/PatchRefinerCheckpoint"
-    if os.path.exists(download_to):
+    if os.path.exists(zip_path):
         print(f"Zip file exists already. Skipping download.")
     else:
         print("Downloading zip file...")
-        snapshot_download(repo_id=hf_id, cache_dir=download_to, repo_type="dataset")
+        hf_hub_download(repo_id=hf_id, filename="download.zip", cache_dir=output_dir, repo_type="dataset")
         print("Download complete!")
         return
-    
-    zip_path = os.path.join(download_to, "download.zip")
 
     print("Extracting ZIP...")
     if not zipfile.is_zipfile(zip_path):
