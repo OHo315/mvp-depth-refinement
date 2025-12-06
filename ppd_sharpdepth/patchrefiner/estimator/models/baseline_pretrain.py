@@ -208,7 +208,7 @@ class BaselinePretrain(nn.Module):
         for h_start in h_start_list:
             for w_start in w_start_list:
                 temp_depth = predictions[patch_select_idx]
-                
+                temp_depth = F.interpolate(temp_depth.unsqueeze(0).unsqueeze(0), size=tile_cfg['patch_raw_shape'], mode="bilinear", align_corners=False).squeeze()
                 count_map = torch.zeros(tile_cfg['image_raw_shape'], device=temp_depth.device)
                 pred_depth = torch.zeros(tile_cfg['image_raw_shape'], device=temp_depth.device)
                 count_map[h_start: h_start+tile_cfg['patch_raw_shape'][0], w_start: w_start+tile_cfg['patch_raw_shape'][1]] = blur_mask
