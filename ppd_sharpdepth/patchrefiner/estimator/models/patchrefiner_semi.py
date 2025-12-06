@@ -35,9 +35,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from mmengine import print_log
 
-from estimator.registry import MODELS
-from estimator.models import build_model
-from estimator.models.utils import HookTool
+from patchrefiner.estimator.registry import MODELS
+from patchrefiner.estimator.models import build_model
+from patchrefiner.estimator.models.utils import HookTool
 import matplotlib.pyplot as plt
 
 from zoedepth.models.zoedepth import ZoeDepth

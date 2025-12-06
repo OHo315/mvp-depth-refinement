@@ -18,7 +18,7 @@ import copy
 from skimage import io
 import kornia
 from PIL import Image
-from estimator.utils import extract_edges, rescale_tensor
+from patchrefiner.estimator.utils import extract_edges, rescale_tensor
 import time
 from mmengine.fileio import dump
 

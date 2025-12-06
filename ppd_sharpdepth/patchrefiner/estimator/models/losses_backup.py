@@ -8,13 +8,13 @@ import torch.nn.functional as F
 import random
 import math
 
-from estimator.registry import MODELS
+from patchrefiner.estimator.registry import MODELS
 from kornia.losses import dice_loss, focal_loss
 
 import numpy as np
-from estimator.utils import RandomBBoxQueries
+from patchrefiner.estimator.utils import RandomBBoxQueries
 import kornia
-from estimator.utils import get_boundaries, compute_metrics, compute_boundary_metrics, extract_edges
+from patchrefiner.estimator.utils import get_boundaries, compute_metrics, compute_boundary_metrics, extract_edges
 from pytorch3d.loss import chamfer_distance
 
 

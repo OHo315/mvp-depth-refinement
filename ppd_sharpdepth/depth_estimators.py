@@ -48,8 +48,9 @@ from .sharpdepth_kinds import SharpDepthKind
 # Attempt to get PatchRefiner model from mmengine. This does not work since it doesn't exist.
 #PatchRefiner = sys.modules["estimator.models.patchrefiner"]
 
-#from .patchrefiner.estimator.models.patchrefiner import PatchRefiner   # Moved this line to inside the function to prevent cyclic imports.
-from .patchrefiner.checkpoints import download as download_checkpoints
+# Moved patchrefiner imports to inside the function to prevent cyclic imports.
+#from .patchrefiner.estimator.models.patchrefiner import PatchRefiner
+#from .patchrefiner.checkpoints import download as download_checkpoints
 
 import torch.nn.functional as F
 
@@ -388,6 +389,7 @@ def get_depth_estimator_fn(
 
         case ModelArchitecture.patchrefiner:
             from .patchrefiner.estimator.models.patchrefiner import PatchRefiner
+            from .patchrefiner.checkpoints import download as download_checkpoints
 
             CONFIG = "./ppd_sharpdepth/patchrefiner/configs/patchrefiner_zoedepth/pr_u4k.py"
             COARSE_CHECKPOINT = "./ppd_sharpdepth/patchrefiner/checkpoints/work_dir/zoedepth/u4k/coarse_pretrain/checkpoint_24.pth"
