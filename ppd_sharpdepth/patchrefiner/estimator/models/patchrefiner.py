@@ -381,6 +381,9 @@ class PatchRefiner(BaselinePretrain, PyTorchModelHubMixin):
             depth = avg_depth_map.get_avg_map()
             depth = depth.unsqueeze(dim=0).unsqueeze(dim=0)
 
+            # Convert depth map back into original dimensions
+            depth = F.interpolate(depth, size=self.tile_cfg["image_raw_shape"], mode='bilinear', align_corners=True)
+
             return depth, \
                 {'rgb': image_lr, 
                  'depth_pred': depth, 
