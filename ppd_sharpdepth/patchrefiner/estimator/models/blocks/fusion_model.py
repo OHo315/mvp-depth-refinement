@@ -90,8 +90,9 @@ class FusionUnet(nn.Module):
         update_base=None):
         
         temp_feat_list = []
-        print(f"c_feat Shape: {c_feat.shape}\nf_feat shape: {f_feat.shape}")
         for idx, (c, f) in enumerate(zip(c_feat, f_feat)):
+            if (idx < 5):
+                print(f"c_feat Shape: {c.shape}\nf_feat shape: {f.shape}")
             if c.shape[-2:] != f.shape[-2:]:
                 c = F.interpolate(c, size=f.shape[-2:], mode='bilinear', align_corners=False)
             feat = torch.cat([c, f], dim=1)
