@@ -1,10 +1,12 @@
-import sys
 import os
-import requests
 import zipfile
+import shutil
+from huggingface_hub import hf_hub_download
+
+#import sys
+#import requests
 #import gdown
-import subprocess
-from huggingface_hub import hf_hub_url, cached_download
+#import subprocess
 
 def download():
     """
@@ -52,13 +54,9 @@ def download():
 
     # Download the zip file from hugging_face
     hf_id = "OHo315/PatchRefinerCheckpoint"
-    if os.path.exists(zip_path):
-        print(f"Zip file exists already. Skipping download.")
-    else:
-        print("Downloading zip file...")
-        url = hf_hub_url(repo_id=hf_id, filename=download_file, repo_type="dataset")
-        zip_path = cached_download(url, cache_dir=output_dir)
-        print(f"Downloaded to {zip_path}!")
+    print("Downloading zip file...")
+    zip_path = hf_hub_download(repo_id=hf_id, filename=download_file, cache_dir=output_dir, repo_type="dataset")
+    print("Download complete!")
 
     print("Extracting ZIP...")
     if not zipfile.is_zipfile(zip_path):
@@ -71,8 +69,8 @@ def download():
     print(f"Extracted zip file to {output_dir}!")
 
     ## Delete ZIP file
-    #os.remove(zip_path)
-    #print("ZIP file deleted.")
+    shutil.rmtree(os.path.join(output_dir, "datasets--OHo315--PatchRefinerCheckpoint"))
+    print("ZIP file deleted.")
 
 if __name__ == "__main__":
     download()
