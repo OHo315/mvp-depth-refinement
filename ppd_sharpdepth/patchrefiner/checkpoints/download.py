@@ -22,11 +22,10 @@ def download():
     
     #file_id = "1X_XZVzo55imXzjkZSa5dHDrqDIHUZlc1" # Google Drive file ID
     output_dir = "./ppd_sharpdepth/patchrefiner/checkpoints"
+    download_file = "work_dir.zip"
 
     # Ensure the directory exists
     os.makedirs(output_dir, exist_ok=True)
-
-    download_to = os.path.join(output_dir)
 
     """
     # Download the zip file from google drive
@@ -49,7 +48,7 @@ def download():
         header = f.read(4)
         print(header)
     """
-    zip_path = os.path.join(output_dir, "download.zip")
+    zip_path = os.path.join(output_dir, download_file)
 
     # Download the zip file from hugging_face
     hf_id = "OHo315/PatchRefinerCheckpoint"
@@ -57,7 +56,7 @@ def download():
         print(f"Zip file exists already. Skipping download.")
     else:
         print("Downloading zip file...")
-        hf_hub_download(repo_id=hf_id, filename="download.zip", cache_dir=output_dir, repo_type="dataset")
+        hf_hub_download(repo_id=hf_id, filename=download_file, cache_dir=output_dir, repo_type="dataset")
         print("Download complete!")
         return
 
