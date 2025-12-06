@@ -4,7 +4,7 @@ import requests
 import zipfile
 #import gdown
 import subprocess
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_url, cached_download
 
 def download():
     """
@@ -56,9 +56,10 @@ def download():
         print(f"Zip file exists already. Skipping download.")
     else:
         print("Downloading zip file...")
-        hf_hub_download(repo_id=hf_id, filename=download_file, cache_dir=output_dir, repo_type="dataset")
-        print("Download complete!")
-        
+        url = hf_hub_url(repo_id=hf_id, filename=download_file, repo_type="dataset")
+        zip_path = cached_download(url, cache_dir=output_dir)
+        print(f"Downloaded to {zip_path}!")
+
     print("Extracting ZIP...")
     if not zipfile.is_zipfile(zip_path):
         print("The provided zip file is not valid.\nPlease delete the zip file and restart the process.")
