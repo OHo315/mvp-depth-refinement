@@ -427,7 +427,7 @@ def get_depth_estimator_fn(
             gc.collect()
             torch.cuda.empty_cache()
 
-            print(f"PATCH_SHAPE: {patchrefiner.patch_process_shape}")
+            #print(f"PATCH_SHAPE: {patchrefiner.patch_process_shape}")
 
             # Change to eval mode
             patchrefiner.eval()
@@ -452,7 +452,7 @@ def get_depth_estimator_fn(
 
                 ret_11hw = patchrefiner.infer_forward(rgb_float_1chw_resized, None, tile_temp, coarse_temp_dict)
                 """
-                print(f"RGB_SHAPE: {rgb_float_1chw_resized.shape}")
+                #print(f"RGB_SHAPE: {rgb_float_1chw_resized.shape}")
 
                 # Upscale image to match default tile_cfg
                 #rgb_float_1chw_resized = F.interpolate(rgb_float_1chw_resized, size=(1080, 1920), mode="bilinear", align_corners=False)
@@ -462,7 +462,7 @@ def get_depth_estimator_fn(
                     'patch_split_num': (2, 2),
                 }
                 # Debug
-                print(f"Tile config: {tile_cfg}")
+                #print(f"Tile config: {tile_cfg}")
 
                 base_pred, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized, tile_cfg=tile_cfg, process_num=1)#, cai_mode="m2")
 
