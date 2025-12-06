@@ -449,15 +449,14 @@ def get_depth_estimator_fn(
 
                 # Upscale image to match default tile_cfg
                 rgb_float_1chw_resized = F.interpolate(rgb_float_1chw_resized, size=(1080, 1920), mode="bilinear", align_corners=False)
-                """
+                
                 _, _, H, W = rgb_float_1chw_resized.shape
                 tile_cfg = {
                     'image_raw_shape': (H, W),
                     'patch_split_num': (2, 2),
                 }
-                """
 
-                ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized, cai_mode="m2") #, tile_cfg=tile_cfg, process_num=1)
+                ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized, cai_mode="m2", tile_cfg=tile_cfg)#, process_num=1)
 
                 return ret_11hw
             
