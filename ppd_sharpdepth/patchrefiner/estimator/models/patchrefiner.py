@@ -229,7 +229,7 @@ class PatchRefiner(BaselinePretrain, PyTorchModelHubMixin):
 
         for idx, (c_feat, r_feat) in enumerate(zip(coarse_features_patch[-self.fusion_feat_level:], refiner_features[-self.fusion_feat_level:])):
             # Add line to interpolate patches from the rgb_image so that tensors have patch_process_shape.
-            #c_feat_list.append(F.interpolate(c_feat, size=r_feat.shape[2:], mode='bilinear', align_corners=False))
+            #c_feat = F.interpolate(c_feat, size=r_feat.shape[2:], mode='bilinear', align_corners=False)
             c_feat_list.append(c_feat)
             r_feat_list.append(r_feat)
         

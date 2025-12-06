@@ -91,6 +91,8 @@ class FusionUnet(nn.Module):
         
         temp_feat_list = []
         for idx, (c, f) in enumerate(zip(c_feat, f_feat)):
+            if c.shape[-2:] != f.shape[-2:]:
+                c = F.interpolate(c, size=f.shape[-2:], mode='bilinear', align_corners=False)
             feat = torch.cat([c, f], dim=1)
             f = self.encoder_layers_1[idx](feat)
             pred1_lvl = F.interpolate(pred1, f.shape[-2:], mode='bilinear', align_corners=True)
