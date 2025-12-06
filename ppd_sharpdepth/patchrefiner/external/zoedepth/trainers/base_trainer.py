@@ -37,8 +37,8 @@ import torch.optim as optim
 import wandb
 from tqdm import tqdm
 
-from zoedepth.utils.config import flatten
-from zoedepth.utils.misc import RunningAverageDict, colorize, colors
+from ppd_sharpdepth.patchrefiner.external.zoedepth.utils.config import flatten
+from ppd_sharpdepth.patchrefiner.external.zoedepth.utils.misc import RunningAverageDict, colorize, colors
 
 
 def is_rank_zero(args):

@@ -26,10 +26,10 @@ import torch
 import torch.cuda.amp as amp
 import torch.nn as nn
 
-from zoedepth.trainers.loss import GradL1Loss, SILogLoss
-from zoedepth.utils.config import DATASETS_CONFIG
-from zoedepth.utils.misc import compute_metrics
-from zoedepth.data.preprocess import get_black_border
+from ppd_sharpdepth.patchrefiner.external.zoedepth.trainers.loss import GradL1Loss, SILogLoss
+from ppd_sharpdepth.patchrefiner.external.zoedepth.utils.config import DATASETS_CONFIG
+from ppd_sharpdepth.patchrefiner.external.zoedepth.utils.misc import compute_metrics
+from ppd_sharpdepth.patchrefiner.external.zoedepth.data.preprocess import get_black_border
 
 from .base_trainer import BaseTrainer
 from torchvision import transforms
