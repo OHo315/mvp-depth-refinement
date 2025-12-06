@@ -462,7 +462,7 @@ def get_depth_estimator_fn(
                     'patch_split_num': (2, 2),
                 }
 
-                ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized, process_num=1)#, cai_mode="m2")#, tile_cfg=tile_cfg)
+                ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized, tile_cfg=tile_cfg, process_num=1)#, cai_mode="m2")
 
                 return ret_11hw
             
