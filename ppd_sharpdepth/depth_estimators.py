@@ -457,7 +457,7 @@ def get_depth_estimator_fn(
                 }
                 """
 
-                ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized, cai_mode="m2") #, tile_cfg=tile_cfg, process_num=1)
+                ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized)#, cai_mode="m2") #, tile_cfg=tile_cfg, process_num=1)
 
                 return ret_11hw
             
