@@ -90,6 +90,7 @@ class FusionUnet(nn.Module):
         update_base=None):
         
         temp_feat_list = []
+        print(f"c_feat Shape: {c_feat.shape}\nf_feat shape: {f_feat.shape}")
         for idx, (c, f) in enumerate(zip(c_feat, f_feat)):
             if c.shape[-2:] != f.shape[-2:]:
                 c = F.interpolate(c, size=f.shape[-2:], mode='bilinear', align_corners=False)
@@ -115,12 +116,14 @@ class FusionUnet(nn.Module):
         final_offset = self.final_conv(final_feat)
         # print(torch.min(final_offset), torch.max(final_offset))
         
+        print(f"final_offset.shape: {final_offset.shape}")
         if update_base is not None:
             # Resize final_offset to match base depth resolution
             if final_offset.shape[-2:] != update_base.shape[-2:]:
                 update_base = F.interpolate(update_base, size=final_offset.shape[-2:])
             depth_prediction = update_base + final_offset
             depth_prediction = torch.clamp(depth_prediction, min=0)
+            print(f"Depth Prediction Shape: {depth_prediction.shape}")
         else:
             depth_prediction = final_offset
         
