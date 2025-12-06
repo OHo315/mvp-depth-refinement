@@ -469,7 +469,7 @@ def get_depth_estimator_fn(
                 image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
                 base_pred = image_processor.unpad_image(base_pred, padding)  # [N*E,1,PH,PW]
                 base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
-                base_pred = base_pred.squeeze().float().cpu().numpy()
+                base_pred = base_pred.squeeze().float()
 
                 ret_11hw = base_pred
 
