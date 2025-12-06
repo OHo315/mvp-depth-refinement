@@ -27,7 +27,7 @@ import torch.nn as nn
 import numpy as np
 from torchvision.transforms import Normalize
 # from zoedepth.models.base_models.dpt_dinov2.dpt import DPT_DINOv2
-from depth_anything.dpt import DPT_DINOv2
+from ppd_sharpdepth.patchrefiner.external.depth_anything.dpt import DPT_DINOv2
 
 
 def denormalize(x):
