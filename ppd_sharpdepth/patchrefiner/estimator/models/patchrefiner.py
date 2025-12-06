@@ -229,8 +229,8 @@ class PatchRefiner(BaselinePretrain, PyTorchModelHubMixin):
 
         for idx, (c_feat, r_feat) in enumerate(zip(coarse_features_patch[-self.fusion_feat_level:], refiner_features[-self.fusion_feat_level:])):
             # Add line to interpolate patches from the rgb_image so that tensors have patch_process_shape.
-            c_feat_list.append(F.interpolate(c_feat, size=r_feat.shape[2:], mode='bilinear', align_corners=False))
-            
+            #c_feat_list.append(F.interpolate(c_feat, size=r_feat.shape[2:], mode='bilinear', align_corners=False))
+            c_feat_list.append(c_feat)
             r_feat_list.append(r_feat)
         
         offset_pred = self.refiner_fusion_model(
@@ -262,7 +262,8 @@ class PatchRefiner(BaselinePretrain, PyTorchModelHubMixin):
             update_base = coarse_temp_dict['coarse_depth_roi']
         else:
             update_base = None
-            
+        
+
         depth_prediction = self.refiner_fusion_forward(coarse_temp_dict['coarse_feats_roi'], coarse_temp_dict['coarse_depth_roi'], refiner_features, refiner_continous_depth, update_base=update_base)
         if self.strategy_refiner_target == 'direct':
             depth_prediction = F.sigmoid(depth_prediction) * self.max_depth
