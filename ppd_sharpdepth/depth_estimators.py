@@ -465,8 +465,8 @@ def get_depth_estimator_fn(
                 print(f"Tile config: {tile_cfg}")
 
                 ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized, tile_cfg=tile_cfg, process_num=1)#, cai_mode="m2")
-
-                #print(f"Return: {ret_11hw}")
+                
+                print(f"Return shape: {ret_11hw.shape}")
                 return ret_11hw
             
         case _:
