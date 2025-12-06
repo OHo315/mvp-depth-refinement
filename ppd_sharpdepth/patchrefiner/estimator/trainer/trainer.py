@@ -11,7 +11,7 @@ from mmengine.dist import get_dist_info, collect_results_cpu, collect_results_gp
 from mmengine import print_log
 import torch.nn.functional as F
 from tqdm import tqdm
-from patchrefiner.estimator.utils import colorize
+from ppd_sharpdepth.patchrefiner.estimator.utils import colorize
 
 class Trainer:
     """

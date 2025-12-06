@@ -38,10 +38,10 @@ from torchvision.ops import roi_align as torch_roi_align
 from huggingface_hub import PyTorchModelHubMixin
 from transformers import PretrainedConfig
 
-from patchrefiner.estimator.registry import MODELS
-from patchrefiner.estimator.models import build_model
-from patchrefiner.estimator.models.baseline_pretrain import BaselinePretrain
-from patchrefiner.estimator.models.utils import generatemask
+from ppd_sharpdepth.patchrefiner.estimator.registry import MODELS
+from ppd_sharpdepth.patchrefiner.estimator.models import build_model
+from ppd_sharpdepth.patchrefiner.estimator.models.baseline_pretrain import BaselinePretrain
+from ppd_sharpdepth.patchrefiner.estimator.models.utils import generatemask
 
 from zoedepth.models.zoedepth import ZoeDepth
 from zoedepth.models.layers.attractor import AttractorLayer, AttractorLayerUnnormed

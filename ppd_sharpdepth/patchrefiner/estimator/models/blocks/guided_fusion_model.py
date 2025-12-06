@@ -26,9 +26,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from patchrefiner.estimator.models.blocks.swin_layers import G2LFusion
+from ppd_sharpdepth.patchrefiner.estimator.models.blocks.swin_layers import G2LFusion
 from torchvision.ops import roi_align as torch_roi_align
-from patchrefiner.estimator.registry import MODELS
+from ppd_sharpdepth.patchrefiner.estimator.registry import MODELS
 
 class DoubleConvWOBN(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""

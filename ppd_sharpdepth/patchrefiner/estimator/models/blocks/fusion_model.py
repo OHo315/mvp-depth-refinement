@@ -2,8 +2,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from patchrefiner.estimator.registry import MODELS
-from patchrefiner.estimator.models.blocks.convs import SingleConvCNNLN, DoubleConv, SingleConv, SingleConvLN
+from ppd_sharpdepth.patchrefiner.estimator.registry import MODELS
+from ppd_sharpdepth.patchrefiner.estimator.models.blocks.convs import SingleConvCNNLN, DoubleConv, SingleConv, SingleConvLN
 
 class UpSample(nn.Module):
     """Upscaling then cat and DoubleConv"""

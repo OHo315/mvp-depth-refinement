@@ -39,15 +39,15 @@ from huggingface_hub import PyTorchModelHubMixin
 from mmengine.config import ConfigDict
 from transformers import PretrainedConfig
 
-from patchrefiner.estimator.registry import MODELS
-from patchrefiner.estimator.models import build_model
-from patchrefiner.estimator.models.utils import get_activation, generatemask, RunningAverageMap
-from patchrefiner.estimator.models.baseline_pretrain import BaselinePretrain
-from patchrefiner.estimator.models.utils import HookTool
+from ppd_sharpdepth.patchrefiner.estimator.registry import MODELS
+from ppd_sharpdepth.patchrefiner.estimator.models import build_model
+from ppd_sharpdepth.patchrefiner.estimator.models.utils import get_activation, generatemask, RunningAverageMap
+from ppd_sharpdepth.patchrefiner.estimator.models.baseline_pretrain import BaselinePretrain
+from ppd_sharpdepth.patchrefiner.estimator.models.utils import HookTool
 
-from patchrefiner.external.zoedepth.models.zoedepth import ZoeDepth
-from patchrefiner.external.zoedepth.models.base_models.midas import Resize as ResizeZoe
-from patchrefiner.external.depth_anything.transform import Resize as ResizeDA
+from ppd_sharpdepth.patchrefiner.external.zoedepth.models.zoedepth import ZoeDepth
+from ppd_sharpdepth.patchrefiner.external.zoedepth.models.base_models.midas import Resize as ResizeZoe
+from ppd_sharpdepth.patchrefiner.external.depth_anything.transform import Resize as ResizeDA
 
 @MODELS.register_module()
 class PatchRefiner(BaselinePretrain, PyTorchModelHubMixin):

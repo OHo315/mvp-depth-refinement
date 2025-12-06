@@ -32,13 +32,13 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 from mmengine import print_log
-from patchrefiner.estimator.registry import MODELS
-from patchrefiner.estimator.models import build_model
-from patchrefiner.estimator.models.utils import generatemask, RunningAverageMap
+from ppd_sharpdepth.patchrefiner.estimator.registry import MODELS
+from ppd_sharpdepth.patchrefiner.estimator.models import build_model
+from ppd_sharpdepth.patchrefiner.estimator.models.utils import generatemask, RunningAverageMap
 
-from patchrefiner.external.zoedepth.models.zoedepth import ZoeDepth
-from patchrefiner.external.zoedepth.models.base_models.midas import Resize as ResizeZoe
-from patchrefiner.external.depth_anything.transform import Resize as ResizeDA
+from ppd_sharpdepth.patchrefiner.external.zoedepth.models.zoedepth import ZoeDepth
+from ppd_sharpdepth.patchrefiner.external.zoedepth.models.base_models.midas import Resize as ResizeZoe
+from ppd_sharpdepth.patchrefiner.external.depth_anything.transform import Resize as ResizeDA
 
 @MODELS.register_module()
 class BaselinePretrain(nn.Module):

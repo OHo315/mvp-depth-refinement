@@ -10,7 +10,7 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 from mmengine.dist import get_dist_info, collect_results_cpu, collect_results_gpu
 from mmengine import print_log
-from estimator.utils import colorize, colorize_infer_pfv1, colorize_rescale
+from ppd_sharpdepth.patchrefiner.estimator.utils import colorize, colorize_infer_pfv1, colorize_rescale
 import torch.nn.functional as F
 from tqdm import tqdm
 from mmengine.utils import mkdir_or_exist
@@ -18,7 +18,7 @@ import copy
 from skimage import io
 import kornia
 from PIL import Image
-from patchrefiner.estimator.utils import extract_edges, rescale_tensor
+from ppd_sharpdepth.patchrefiner.estimator.utils import extract_edges, rescale_tensor
 import time
 from mmengine.fileio import dump
 

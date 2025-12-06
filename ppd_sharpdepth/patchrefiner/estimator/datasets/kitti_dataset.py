@@ -5,16 +5,16 @@ import numpy as np
 from torch.utils.data import Dataset
 import torch.nn as nn
 from torchvision import transforms
-from patchrefiner.external.zoedepth.models.base_models.midas import Resize
-from patchrefiner.external.depth_anything.transform import Resize as ResizeDA
+from ppd_sharpdepth.patchrefiner.external.zoedepth.models.base_models.midas import Resize
+from ppd_sharpdepth.patchrefiner.external.depth_anything.transform import Resize as ResizeDA
 import os.path as osp
 from collections import OrderedDict
 from prettytable import PrettyTable
 from mmengine import print_log
 import copy
-from patchrefiner.estimator.datasets.transformers import aug_color, aug_flip, to_tensor, random_crop, aug_rotate
-from patchrefiner.estimator.registry import DATASETS
-from patchrefiner.estimator.utils import get_boundaries, compute_metrics
+from ppd_sharpdepth.patchrefiner.estimator.datasets.transformers import aug_color, aug_flip, to_tensor, random_crop, aug_rotate
+from ppd_sharpdepth.patchrefiner.estimator.registry import DATASETS
+from ppd_sharpdepth.patchrefiner.estimator.utils import get_boundaries, compute_metrics
 import cv2
 from PIL import Image
 

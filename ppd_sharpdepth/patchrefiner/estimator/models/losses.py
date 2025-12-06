@@ -8,15 +8,15 @@ import torch.nn.functional as F
 import random
 import math
 
-from patchrefiner.estimator.registry import MODELS
+from ppd_sharpdepth.patchrefiner.estimator.registry import MODELS
 from kornia.losses import dice_loss, focal_loss
 
 import numpy as np
-from patchrefiner.estimator.utils import RandomBBoxQueries
+from ppd_sharpdepth.patchrefiner.estimator.utils import RandomBBoxQueries
 import kornia
-from patchrefiner.estimator.utils import get_boundaries, compute_metrics, compute_boundary_metrics, extract_edges
+from ppd_sharpdepth.patchrefiner.estimator.utils import get_boundaries, compute_metrics, compute_boundary_metrics, extract_edges
 # from pytorch3d.loss import chamfer_distance
-from patchrefiner.estimator.utils import RandomBBoxQueries
+from ppd_sharpdepth.patchrefiner.estimator.utils import RandomBBoxQueries
 
 @MODELS.register_module()
 class SILogLoss(nn.Module):
