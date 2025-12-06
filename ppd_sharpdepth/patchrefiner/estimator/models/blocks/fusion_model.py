@@ -118,12 +118,7 @@ class FusionUnet(nn.Module):
         if update_base is not None:
             # Resize final_offset to match base depth resolution
             if final_offset.shape[-2:] != update_base.shape[-2:]:
-                final_offset = F.interpolate(
-                    final_offset,
-                    size=update_base.shape[-2:],  # (H,W)
-                    mode='bilinear',
-                    align_corners=True
-                )
+                update_base = F.interpolate(update_base, size=final_offset.shape[-2:])
             depth_prediction = update_base + final_offset
             depth_prediction = torch.clamp(depth_prediction, min=0)
         else:
