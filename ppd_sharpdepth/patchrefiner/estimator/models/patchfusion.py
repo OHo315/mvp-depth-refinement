@@ -43,12 +43,12 @@ from ppd_sharpdepth.patchrefiner.estimator.models import build_model
 from ppd_sharpdepth.patchrefiner.estimator.models.baseline_pretrain import BaselinePretrain
 from ppd_sharpdepth.patchrefiner.estimator.models.utils import generatemask
 
-from zoedepth.models.zoedepth import ZoeDepth
-from zoedepth.models.layers.attractor import AttractorLayer, AttractorLayerUnnormed
-from zoedepth.models.layers.dist_layers import ConditionalLogBinomial
-from zoedepth.models.layers.localbins_layers import (Projector, SeedBinRegressor, SeedBinRegressorUnnormed)
-from zoedepth.models.base_models.midas import Resize as ResizeZoe
-from depth_anything.transform import Resize as ResizeDA
+from ppd_sharpdepth.patchrefiner.external.zoedepth.models.zoedepth import ZoeDepth
+from ppd_sharpdepth.patchrefiner.external.zoedepth.models.layers.attractor import AttractorLayer, AttractorLayerUnnormed
+from ppd_sharpdepth.patchrefiner.external.zoedepth.models.layers.dist_layers import ConditionalLogBinomial
+from ppd_sharpdepth.patchrefiner.external.zoedepth.models.layers.localbins_layers import (Projector, SeedBinRegressor, SeedBinRegressorUnnormed)
+from ppd_sharpdepth.patchrefiner.external.zoedepth.models.base_models.midas import Resize as ResizeZoe
+from ppd_sharpdepth.patchrefiner.external.depth_anything.transform import Resize as ResizeDA
 
 
 

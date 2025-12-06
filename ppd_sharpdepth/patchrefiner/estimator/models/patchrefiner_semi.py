@@ -40,7 +40,7 @@ from ppd_sharpdepth.patchrefiner.estimator.models import build_model
 from ppd_sharpdepth.patchrefiner.estimator.models.utils import HookTool
 import matplotlib.pyplot as plt
 
-from zoedepth.models.zoedepth import ZoeDepth
+from ppd_sharpdepth.patchrefiner.external.zoedepth.models.zoedepth import ZoeDepth
 
 @MODELS.register_module()
 class PatchRefinerSemi(nn.Module):
