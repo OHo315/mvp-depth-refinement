@@ -7,6 +7,7 @@ from PIL import Image
 import sys
 import os
 from mmengine.config import Config
+import gc
 
 from diffusers import UNet2DConditionModel
 from ppd_sharpdepth.sharpdepth.util.alignment import align_depth_least_square
@@ -419,6 +420,12 @@ def get_depth_estimator_fn(
             #print(f"Fine checkpoint patch_process_shape: {fine_ckpt['model_state_dict']['tile_cfg']}")
             patchrefiner.load_state_dict(fine_ckpt['model_state_dict'], strict=False)
             print("Fine branch loaded!")
+
+            # Delete loaded checkpoints to free memory
+            del coarse_ckpt
+            del fine_ckpt
+            gc.collect()
+            torch.cuda.empty_cache()
 
             print(f"PATCH_SHAPE: {patchrefiner.patch_process_shape}")
 
