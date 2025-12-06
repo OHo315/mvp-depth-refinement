@@ -10,14 +10,14 @@ from PIL import Image
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
-from estimator.registry import DATASETS
-from estimator.utils import get_boundaries, compute_metrics
-from estimator.datasets.transformers import aug_color, aug_flip, to_tensor, random_crop, aug_rotate
-from estimator.datasets.u4k_dataset import UnrealStereo4kDataset
-from estimator.datasets.utils import readPFM
+from patchrefiner.estimator.registry import DATASETS
+from patchrefiner.estimator.utils import get_boundaries, compute_metrics
+from patchrefiner.estimator.datasets.transformers import aug_color, aug_flip, to_tensor, random_crop, aug_rotate
+from patchrefiner.estimator.datasets.u4k_dataset import UnrealStereo4kDataset
+from patchrefiner.estimator.datasets.utils import readPFM
 
-from zoedepth.models.base_models.midas import Resize
-from depth_anything.transform import Resize as ResizeDA
+from patchrefiner.external.zoedepth.models.base_models.midas import Resize
+from patchrefiner.external.depth_anything.transform import Resize as ResizeDA
 
 def read_image(path, dataset_name, image_resolution=(2160, 3840)):
     if dataset_name == 'u4k':
