@@ -427,7 +427,7 @@ def get_depth_estimator_fn(
             gc.collect()
             torch.cuda.empty_cache()
 
-            print(f"PATCH_SHAPE: {patchrefiner.patch_process_shape}")
+            #print(f"PATCH_SHAPE: {patchrefiner.patch_process_shape}")
 
             # Change to eval mode
             patchrefiner.eval()
@@ -452,17 +452,26 @@ def get_depth_estimator_fn(
 
                 ret_11hw = patchrefiner.infer_forward(rgb_float_1chw_resized, None, tile_temp, coarse_temp_dict)
                 """
-                print(f"RGB_SHAPE: {rgb_float_1chw_resized.shape}")
+                #print(f"RGB_SHAPE: {rgb_float_1chw_resized.shape}")
 
                 # Upscale image to match default tile_cfg
-                rgb_float_1chw_resized = F.interpolate(rgb_float_1chw_resized, size=(1080, 1920), mode="bilinear", align_corners=False)
+                #rgb_float_1chw_resized = F.interpolate(rgb_float_1chw_resized, size=(1080, 1920), mode="bilinear", align_corners=False)
                 _, _, H, W = rgb_float_1chw_resized.shape
                 tile_cfg = {
                     'image_raw_shape': (H, W),
                     'patch_split_num': (2, 2),
                 }
+                # Debug
+                #print(f"Tile config: {tile_cfg}")
 
-                ret_11hw, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized, tile_cfg=tile_cfg, process_num=1)#, cai_mode="m2")
+                base_pred, _ = patchrefiner.forward(mode='infer', image_lr=rgb_float_1chw_resized, image_hr=rgb_float_1chw_resized, tile_cfg=tile_cfg, process_num=1)#, cai_mode="m2")
+
+                image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
+                base_pred = image_processor.unpad_image(base_pred, padding)  # [N*E,1,PH,PW]
+                base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+                base_pred = base_pred.squeeze().float()
+
+                ret_11hw = base_pred
 
                 return ret_11hw
             

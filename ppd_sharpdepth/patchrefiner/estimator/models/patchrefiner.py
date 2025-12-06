@@ -263,6 +263,7 @@ class PatchRefiner(BaselinePretrain, PyTorchModelHubMixin):
         else:
             update_base = None
         
+        #print(f"update_base.shape: {update_base.shape}")
 
         depth_prediction = self.refiner_fusion_forward(coarse_temp_dict['coarse_feats_roi'], coarse_temp_dict['coarse_depth_roi'], refiner_features, refiner_continous_depth, update_base=update_base)
         if self.strategy_refiner_target == 'direct':
@@ -380,6 +381,10 @@ class PatchRefiner(BaselinePretrain, PyTorchModelHubMixin):
             # depth = avg_depth_map.average_map
             depth = avg_depth_map.get_avg_map()
             depth = depth.unsqueeze(dim=0).unsqueeze(dim=0)
+
+            # Convert depth map back into original dimensions
+            depth = F.interpolate(depth, size=self.tile_cfg["image_raw_shape"], mode='bilinear', align_corners=True)
+            #print(f"Return depth shape from PatchRefiner: {depth.shape}")
 
             return depth, \
                 {'rgb': image_lr, 
