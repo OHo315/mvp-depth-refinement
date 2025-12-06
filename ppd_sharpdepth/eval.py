@@ -102,7 +102,6 @@ if __name__ == "__main__":
         # GT data
         depth_raw_ts = data["depth_raw_linear"].squeeze()
         valid_mask_ts = data["valid_mask_raw"].squeeze()
-        intrinsics_ts = data["intrinsics"].squeeze()
         rgb_name = data["rgb_relative_path"][0]
 
         depth_raw = depth_raw_ts.numpy()
@@ -118,6 +117,7 @@ if __name__ == "__main__":
         total_valid_examples += 1
         
         if with_edge_metric:
+            intrinsics_ts = data["intrinsics"].squeeze()
             intrinsics = intrinsics_ts.numpy()
             total_ppd += ppd_metric(depth_pred, depth_raw, intrinsics)
         
