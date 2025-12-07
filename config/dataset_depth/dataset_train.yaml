@@ -10,20 +10,20 @@ dataset:
       resize_to_hw:
       - 480
       - 640 
-    # - name: hypersim
-    #   disp_name: hypersim
-    #   dir: hypersim_processed/train/
-    #   filenames: data_split/hypersim_depth/hypersim_train_filename_list.txt
-    #   resize_to_hw:
-    #   - 480
-    #   - 640 
-    - name: waymo
-      disp_name: waymo
-      dir: waymo_preprocess/
-      filenames: data_split/waymo_depth/waymo_train_filename_list.txt
+    - name: hypersim
+      disp_name: hypersim
+      dir: hypersim_processed/train/
+      filenames: data_split/hypersim_depth/hypersim_train_filename_list.txt
       resize_to_hw:
       - 480
       - 640 
+    # - name: waymo
+    #   disp_name: waymo
+    #   dir: waymo_preprocess/
+    #   filenames: data_split/waymo_depth/waymo_train_filename_list.txt
+    #   resize_to_hw:
+    #   - 480
+    #   - 640 
     - name: diode_indoor
       disp_name: diode_indoor
       dir: diode/
