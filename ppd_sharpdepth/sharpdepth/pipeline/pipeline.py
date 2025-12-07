@@ -119,6 +119,7 @@ class SharpDepthPipeline(DiffusionPipeline):
         blur_difference_map_scale_factor: int = 1,
         noise_aware_latent_noise_scale: float = 1.0,
         use_conditioning_for_initial_ppd: bool = False,
+        initialize_ppd_from_timestep: Optional[int] = None,
     ):
         super().__init__()
 
@@ -166,6 +167,8 @@ class SharpDepthPipeline(DiffusionPipeline):
         self.noise_aware_latent_noise_scale = noise_aware_latent_noise_scale
 
         self.use_conditioning_for_initial_ppd = use_conditioning_for_initial_ppd
+
+        self.initialize_ppd_from_timestep = initialize_ppd_from_timestep
 
     @torch.no_grad()
     def __call__(
@@ -325,10 +328,17 @@ class SharpDepthPipeline(DiffusionPipeline):
             noisy_depth_cond = (norm_base_depth - 0.5) * (1 - scaled_l1_mask) + (torch.randn_like(norm_base_depth) * scaled_l1_mask)
 
             # second PPD
+
             noise = torch.randn_like(noise)
-            with torch.autocast(self.device.type,dtype=self.unet.dtype):
+            if self.initialize_ppd_from_timestep is not None:
+                timesteps = torch.tensor([timestep for timestep in self.unet.sampling_timesteps if timestep <= self.initialize_ppd_from_timestep],device=self.device,dtype=self.unet.dtype)
+                latent = self.unet.schedule.forward(norm_base_depth - 0.5, noise, torch.tensor(self.initialize_ppd_from_timestep,device=self.device,dtype=self.unet.dtype))
+            else:
+                timesteps = torch.tensor(self.unet.sampling_timesteps,device=self.device,dtype=self.unet.dtype)
                 latent = noise
-                for timestep in self.unet.sampling_timesteps:
+
+            with torch.autocast(self.device.type,dtype=self.unet.dtype):
+                for timestep in timesteps:
                     student_input = torch.cat([latent, cond, noisy_depth_cond], dim=1)
                     pred = self.unet.dit(x=student_input, semantics=semantics, timestep=timestep)
                     latent = self.unet.sampler.step(pred=pred, x_t=latent, t=timestep)

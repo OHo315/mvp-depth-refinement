@@ -168,8 +168,10 @@ def get_depth_estimator_fn(
                 default_denoising_steps=1,
                 frozen_unet=frozen_unet,
                 unet=student_unet,
-                blur_difference_map_scale_factor=32, 
-                noise_aware_latent_noise_scale=0.25
+                blur_difference_map_scale_factor=1, 
+                noise_aware_latent_noise_scale=0,
+                use_conditioning_for_initial_ppd=False,
+                initialize_ppd_from_timestep=249,
             )
             assert pipeline.default_processing_resolution == 768, f"default_processing_resolution = {pipeline.default_processing_resolution}, expected 768"
             assert pipeline.default_denoising_steps == 1, f"default_denoising_steps = {pipeline.default_denoising_steps}, expected 1"
