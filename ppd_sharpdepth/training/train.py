@@ -410,6 +410,7 @@ if "__main__" == __name__:
     parser.add_argument("--forward_diffuse_from",type=str, default="initial_pred_depth", help="Where to start the *forward* diffusion from during training. Options: initial_pred_depth, base_pred_depth")
     parser.add_argument("--log_depth_maps", action="store_true", help="Log training depth maps (SDS loss, depth loss, etc.) to disk. Slows down training")
     parser.add_argument("--initialize_ppd_from_timestep", type=int, default=None, help="Timestep to initialize the PPD from")
+    parser.add_argument("--max_sds_timestep", type=int, default=None, help="Maximum timestep for the SDS loss")
 
     args = parser.parse_args()
 
@@ -1297,7 +1298,8 @@ if "__main__" == __name__:
                         student_pred_depth_latent, _ = unwrapped_student_denoiser.schedule.convert_from_pred(student_pred_depth_latent_velocity, 'velocity', xt, timestep)
                         pred_depth = student_pred_depth = student_pred_depth_latent + 0.5
 
-                        sds_timestep = unwrapped_student_denoiser.sampling_timesteps[-1]
+                        available_sds_timesteps = [timestep for timestep in unwrapped_student_denoiser.sampling_timesteps if timestep <= args.max_sds_timestep]
+                        sds_timestep = torch.tensor(random.choice(available_sds_timesteps), device=device, dtype=weight_dtype)
 
                         # SDS loss
                         noise = torch.randn_like(student_pred_depth_latent)
@@ -1309,12 +1311,12 @@ if "__main__" == __name__:
                             frozen_denoiser_pred_depth = frozen_denoiser_pred_depth_latent + 0.5
 
                             # TODO figure out if the sign should be reversed here
-                            score_vector = (pred_noise - noise)
+                            score_vector = (pred_noise.float() - noise.float())
 
                     # let's do sds loss only in the regions with low l1 error 
 
-                    high_freq_sds_loss = (score_vector - maybe_blur(score_vector)).abs() * ((1-maybe_blur(l1_error))**2)
-                    sds_loss = 0.5 * F.mse_loss(student_pred_depth_latent, high_freq_sds_loss.detach(), reduction="mean")
+                    high_freq_sds_score_vector = score_vector#(score_vector - maybe_blur(score_vector)).abs() * ((1-maybe_blur(l1_error))**2)
+                    sds_loss = 0.5 * F.mse_loss(student_pred_depth_latent.float(), (student_pred_depth_latent.float() - high_freq_sds_score_vector.float()).detach().float(), reduction="mean")
 
                     if accelerator.is_main_process and args.log_depth_maps and step % 10 == 0:
                         with torch.no_grad():
@@ -1383,8 +1385,14 @@ if "__main__" == __name__:
                     with torch.no_grad():
 
                         # let's do multiple diffusion steps
-                        final_generation_latent = noise
-                        for timestep in unwrapped_student_denoiser.sampling_timesteps:
+                        if args.initialize_ppd_from_timestep is not None:
+                            timesteps = torch.tensor([timestep for timestep in unwrapped_student_denoiser.sampling_timesteps if timestep <= args.initialize_ppd_from_timestep],device=device,dtype=weight_dtype)
+                            final_generation_latent = unwrapped_student_denoiser.schedule.forward(student_pred_depth_latent, noise, torch.tensor(args.initialize_ppd_from_timestep,device=device,dtype=weight_dtype))
+                        else:
+                            timesteps = torch.tensor(unwrapped_student_denoiser.sampling_timesteps,device=device,dtype=weight_dtype)
+                            final_generation_latent = noise
+
+                        for timestep in timesteps:
                             input = torch.cat([final_generation_latent, cond, noisy_depth_cond], dim=1)
                             pred = student_denoiser(x=input, semantics=semantics, timestep=timestep)
                             final_generation_latent = unwrapped_student_denoiser.sampler.step(pred=pred, x_t=final_generation_latent, t=timestep)
@@ -1544,7 +1552,7 @@ if "__main__" == __name__:
                                     for vis_idx, batch in enumerate(loader):
                                         vis_imgs = {}
                                         images[loader_idx].append(vis_imgs)
-                                        if vis_idx > 5:
+                                        if vis_idx > 10:
                                             continue
                                         rgb = Image.fromarray(
                                             batch["rgb_int"]
@@ -1744,8 +1752,8 @@ if "__main__" == __name__:
                 update_loss_exponential_moving_averages(losses_and_counts)
 
                 logs = {
-                    "loss": round(last_loss_accum.cpu().item(), 4),
-                    **{f"loss_{conditioning_kind}_{loss_key}": round(loss_exponential_moving_averages[conditioning_kind][loss_key].item(), 4) for conditioning_kind in conditioning_kinds for loss_key in loss_keys},
+                    "loss": round(last_loss_accum.cpu().item(), 6),
+                    **{f"loss_{conditioning_kind}_{loss_key}": round(loss_exponential_moving_averages[conditioning_kind][loss_key].item(), 6) for conditioning_kind in conditioning_kinds for loss_key in loss_keys},
                     "lr": lr_scheduler.get_last_lr()[0],
                 }
                 progress_bar.set_postfix(**logs)

@@ -14,13 +14,13 @@ dataset:
     filenames: data_split/nyu_depth/labeled/filename_list_test.txt
     eigen_valid_mask: true
 
-  - name: hypersim
-    disp_name: hypersim
-    dir: hypersim_processed/val/
-    filenames: data_split/hypersim_depth/hypersim_val_filename_list.txt
-    resize_to_hw:
-    - 480
-    - 640 
+  # - name: hypersim
+  #   disp_name: hypersim
+  #   dir: hypersim_processed/val/
+  #   filenames: data_split/hypersim_depth/hypersim_val_filename_list.txt
+  #   resize_to_hw:
+  #   - 480
+  #   - 640 
 
   # - name: kitti
   #   disp_name: kitti_depth
