@@ -118,6 +118,7 @@ class SharpDepthPipeline(DiffusionPipeline):
         base_depth_estimator_fn=None,
         blur_difference_map_scale_factor: int = 1,
         noise_aware_latent_noise_scale: float = 1.0,
+        use_conditioning_for_initial_ppd: bool = False,
     ):
         super().__init__()
 
@@ -163,6 +164,8 @@ class SharpDepthPipeline(DiffusionPipeline):
         self.blur_difference_map_scale_factor = blur_difference_map_scale_factor
 
         self.noise_aware_latent_noise_scale = noise_aware_latent_noise_scale
+
+        self.use_conditioning_for_initial_ppd = use_conditioning_for_initial_ppd
 
     @torch.no_grad()
     def __call__(
@@ -299,34 +302,21 @@ class SharpDepthPipeline(DiffusionPipeline):
             norm_base_depth = normalize_obj["norm_depth"].to(dtype=self.unet.dtype)
             norm_base_depth = norm_base_depth * 0.5 + 0.5
 
-            def blur(x_11hw, scale_factor):
-                small_h = x_11hw.shape[2] // scale_factor
-                small_w = x_11hw.shape[3] // scale_factor
-                downscaled = TV_F.resize(x_11hw, size=(small_h, small_w), interpolation=TV_F.InterpolationMode.BILINEAR)
-                upscaled = TV_F.resize(downscaled, size=(x_11hw.shape[2], x_11hw.shape[3]), interpolation=TV_F.InterpolationMode.BILINEAR)
-                return upscaled
-            
-            def maybe_blur(x_11hw):
-                if self.blur_difference_map_scale_factor != 1:
-                    return blur(x_11hw, self.blur_difference_map_scale_factor)
-                else:
-                    return x_11hw
-
             # initial PPD
             cond = rgb_float_1chw_resized - 0.5
             noise = torch.randn(size=[cond.shape[0], 1, cond.shape[2], cond.shape[3]]).to(self.device)
             with torch.autocast(self.device.type,dtype=self.unet.dtype):
                 semantics = self.unet.semantics_prompt(rgb_float_1chw_resized)
                 latent = noise
-                cond_noise = torch.randn_like(latent) # norm_base_depth - 0.5 # 
+                cond_noise = (norm_base_depth - 0.5) if self.use_conditioning_for_initial_ppd else torch.randn_like(latent)
                 for timestep in self.unet.sampling_timesteps:
-                    input = torch.cat([latent, cond, maybe_blur(cond_noise)], dim=1)
+                    input = torch.cat([latent, cond, cond_noise], dim=1)
                     pred = self.unet.dit(x=input, semantics=semantics, timestep=timestep)
                     latent = self.unet.sampler.step(pred=pred, x_t=latent, t=timestep)
                 initial_pred = latent + 0.5
         
             # compute difference mask
-            l1_error = torch.abs(maybe_blur(initial_pred) - maybe_blur(norm_base_depth))
+            l1_error = torch.abs(initial_pred - norm_base_depth)
             l1_error = l1_error / l1_error.max()
             l1_error = l1_error.clip(0, 1)
             l1_mask = l1_error
@@ -339,7 +329,7 @@ class SharpDepthPipeline(DiffusionPipeline):
             with torch.autocast(self.device.type,dtype=self.unet.dtype):
                 latent = noise
                 for timestep in self.unet.sampling_timesteps:
-                    student_input = torch.cat([latent, cond, maybe_blur(noisy_depth_cond)], dim=1)
+                    student_input = torch.cat([latent, cond, noisy_depth_cond], dim=1)
                     pred = self.unet.dit(x=student_input, semantics=semantics, timestep=timestep)
                     latent = self.unet.sampler.step(pred=pred, x_t=latent, t=timestep)
                 student_pred_depth = latent + 0.5

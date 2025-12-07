@@ -402,6 +402,9 @@ if "__main__" == __name__:
     parser.add_argument("--sds_loss_weight", type=float, default=1.0, help="Weight for the SDS loss")
     parser.add_argument("--blur_unidepth_output_ratio", type=int, default=1, help="Ratio of downscaling the unidepth output, for guidance, l1 error, and depth loss computation")
     parser.add_argument("--noise_aware_latent_noise_scale", type=float, default=1.0, help="Scale for the noise aware latent noise. 0 means no noise, 1 means default behavior.")
+    parser.add_argument("--use_conditioning_for_initial_ppd", action="store_true", help="Whether to use conditioning for the initial PPD")
+    parser.add_argument("--gaussian_blur", action="store_true", help="Whether to use Gaussian blur for the difference map")
+    parser.add_argument("--blur_depth_loss", action="store_true", help="Whether to blur the depth loss")
 
     args = parser.parse_args()
 
@@ -1205,11 +1208,14 @@ if "__main__" == __name__:
                     # calculate difference
 
                     def blur(x_11hw, scale_factor):
-                        small_h = x_11hw.shape[2] // scale_factor
-                        small_w = x_11hw.shape[3] // scale_factor
-                        downscaled = TV_F.resize(x_11hw, size=(small_h, small_w), interpolation=TV_F.InterpolationMode.BILINEAR)
-                        upscaled = TV_F.resize(downscaled, size=(x_11hw.shape[2], x_11hw.shape[3]), interpolation=TV_F.InterpolationMode.BILINEAR)
-                        return upscaled
+                        if args.gaussian_blur:
+                            return TV_F.gaussian_blur(x_11hw, kernel_size=2*(scale_factor//2)+1, sigma=scale_factor/2)
+                        else:
+                            small_h = x_11hw.shape[2] // scale_factor
+                            small_w = x_11hw.shape[3] // scale_factor
+                            downscaled = F.interpolate(x_11hw, size=(small_h, small_w), mode="area")
+                            upscaled = F.interpolate(downscaled, size=(x_11hw.shape[2], x_11hw.shape[3]), mode="bilinear")
+                            return upscaled
                     
                     def maybe_blur(x_11hw):
                         if args.blur_unidepth_output_ratio != 1:
@@ -1224,7 +1230,7 @@ if "__main__" == __name__:
                         with torch.autocast(device.type,dtype=weight_dtype):
                             semantics = unwrapped_frozen_denoiser.semantics_prompt(rgb)
                             latent = noise
-                            noisy_depth_cond = torch.randn_like(latent)
+                            noisy_depth_cond = (norm_base_depth - 0.5) if args.use_conditioning_for_initial_ppd else torch.randn_like(latent)
                             for timestep in unwrapped_student_denoiser.sampling_timesteps:
                                 input = torch.cat([latent, cond, noisy_depth_cond], dim=1)
                                 pred = student_denoiser(x=input, semantics=semantics, timestep=timestep)
@@ -1317,13 +1323,10 @@ if "__main__" == __name__:
                             final_depth_colored.save("/tmp/viz/final_depth.png")
                             
                             
+                    maybe_blur_depth_loss = lambda x: maybe_blur(x) if args.blur_depth_loss else x
                             
-
-
-
-
                     depth_loss = l1_loss(
-                        maybe_blur(student_pred_depth_latent + 0.5), maybe_blur(x0 + 0.5), maybe_blur(torch.ones_like(l1_error))
+                        maybe_blur_depth_loss(student_pred_depth_latent + 0.5), maybe_blur_depth_loss(x0 + 0.5), torch.ones_like(l1_error)
                     )
                     depth_mse = F.mse_loss(student_pred_depth_latent + 0.5, x0 + 0.5, reduction="mean")
 
@@ -1373,7 +1376,7 @@ if "__main__" == __name__:
                             frozen_pred_depth_aligned = torch.from_numpy(frozen_pred_depth_aligned).to(device)
 
                             initial_depth_loss = l1_loss(
-                                maybe_blur(frozen_pred_depth_aligned), maybe_blur(x0 + 0.5), torch.ones_like(l1_error)
+                                frozen_pred_depth_aligned, x0 + 0.5, torch.ones_like(l1_error)
                             )
                             initial_depth_mse = F.mse_loss(frozen_pred_depth_aligned, x0 + 0.5, reduction="mean")
 
@@ -1477,6 +1480,7 @@ if "__main__" == __name__:
                                 base_depth_estimator_fn=base_depth_estimator_fn,
                                 blur_difference_map_scale_factor=args.blur_unidepth_output_ratio,
                                 noise_aware_latent_noise_scale=args.noise_aware_latent_noise_scale,
+                                use_conditioning_for_initial_ppd=args.use_conditioning_for_initial_ppd,
                             ).to(accelerator.device, dtype=weight_dtype)
                             avg_rmse = 0.0
                             avg_rmse_base = 0.0

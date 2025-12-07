@@ -27,7 +27,7 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --lr_scheduler cosine \
     --lr_warmup_steps 100 \
     --tracker_project_name ppd_sharpdepth_train \
-    --wandb_name "identity_no_blur_1_gpu" \
+    --wandb_name "identity_gaussian_blur_32x_1_gpu_on_policy" \
     --set_grads_to_none \
     --checkpointing_steps 500 \
     --validation_steps 200 \
@@ -42,6 +42,9 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --denoiser pixel_perfect_depth \
     --use_conditioning_probability 0.8 \
     --dit_patch_encoder_lr_multiplier 1 \
-    --blur_unidepth_output_ratio 1 \
+    --blur_unidepth_output_ratio 32 \
+    --gaussian_blur \
+    --blur_depth_loss \
     --noise_aware_latent_noise_scale 0.0 \
+    --use_conditioning_for_initial_ppd \
     "$@"
