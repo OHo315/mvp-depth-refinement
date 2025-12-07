@@ -15,6 +15,7 @@ from diffusers.pipelines.marigold.marigold_image_processing import MarigoldImage
 from ppd_sharpdepth.depth_estimators import ModelArchitecture, get_depth_estimator_fn
 from ppd_sharpdepth.preprocessors import MarigoldPreProcessor, PixelPerfectDepthPreProcessor
 from ppd_sharpdepth.sharpdepth.util.alignment import align_depth_least_square
+import enum
 
 import subprocess
 import json
@@ -397,6 +398,7 @@ if "__main__" == __name__:
     parser.add_argument("--use_conditioning_probability", type=float, default=0.8, help="Probability of using conditioning in the student denoiser")
     parser.add_argument("--wandb_name", type=str, default="", help="Name of the wandb run")
     parser.add_argument("--debug", action="store_true", help="Debug mode")
+    parser.add_argument("--debug_port", type=int, default=5678, help="Port for the debugger")
     parser.add_argument("--compute_initial_depth_loss_probability", type=float, default=1.0, help="Probability of computing the initial depth loss")
     parser.add_argument("--dit_patch_encoder_lr_multiplier", type=float, default=0.01, help="Multiplier for the learning rate of the DiT patch encoder")
     parser.add_argument("--sds_loss_weight", type=float, default=1.0, help="Weight for the SDS loss")
@@ -405,8 +407,16 @@ if "__main__" == __name__:
     parser.add_argument("--use_conditioning_for_initial_ppd", action="store_true", help="Whether to use conditioning for the initial PPD")
     parser.add_argument("--gaussian_blur", action="store_true", help="Whether to use Gaussian blur for the difference map")
     parser.add_argument("--blur_depth_loss", action="store_true", help="Whether to blur the depth loss")
+    parser.add_argument("--forward_diffuse_from",type=str, default="initial_pred_depth", help="Where to start the *forward* diffusion from during training. Options: initial_pred_depth, base_pred_depth")
+    parser.add_argument("--log_depth_maps", action="store_true", help="Log training depth maps (SDS loss, depth loss, etc.) to disk. Slows down training")
 
     args = parser.parse_args()
+
+    class ForwardDiffuseFrom(enum.Enum):
+        INITIAL_PRED_DEPTH = "initial_pred_depth"
+        BASE_PRED_DEPTH = "base_pred_depth"
+
+    forward_diffuse_from = ForwardDiffuseFrom(args.forward_diffuse_from)
 
     sharpdepth_kind = SharpDepthKind(args.denoiser)
 
@@ -460,7 +470,7 @@ if "__main__" == __name__:
     # ---------------------------------------------------------------------
 
     if args.debug and accelerator.is_local_main_process:
-        debugpy.listen(5678)
+        debugpy.listen(args.debug_port)
         print("Waiting for debugger to attach...")
         debugpy.wait_for_client()
         print("Debugger attached")
@@ -1247,19 +1257,29 @@ if "__main__" == __name__:
                         should_use_conditioning = torch.rand(1).item() < args.use_conditioning_probability
                         if should_use_conditioning:
                             conditioning_kind = "cond"
-                            x0 = norm_base_depth - 0.5
+                            target_latent = norm_base_depth - 0.5
+
+                            if forward_diffuse_from == ForwardDiffuseFrom.INITIAL_PRED_DEPTH:
+                                x0 = frozen_pred_depth - 0.5
+                            elif forward_diffuse_from == ForwardDiffuseFrom.BASE_PRED_DEPTH:
+                                x0 = norm_base_depth - 0.5
+                            else:
+                                raise ValueError(f"Invalid forward diffuse from: {forward_diffuse_from}")
+                            xT = torch.randn_like(latent)
+                            xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
+                            
                             scaled_l1_mask = l1_mask * args.noise_aware_latent_noise_scale
                             noisy_depth_cond = (norm_base_depth - 0.5) * (1 - scaled_l1_mask) + (torch.randn_like(x0) * scaled_l1_mask)
-                            xT = torch.randn_like(latent)
-
-                            xt = unwrapped_student_denoiser.schedule.forward(frozen_pred_depth - 0.5, xT, timestep)
 
                             student_input = torch.cat([xt, cond, noisy_depth_cond], dim=1)
                         else:
                             conditioning_kind = "no_cond"
+                            target_latent = norm_base_depth - 0.5
+
                             x0 = norm_base_depth - 0.5
                             xT = noise
                             xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
+
                             noisy_depth_cond = torch.randn_like(xt)
 
                             student_input = torch.cat([xt, cond, noisy_depth_cond], dim=1)
@@ -1278,6 +1298,7 @@ if "__main__" == __name__:
                             frozen_denoiser_input = torch.cat([noised_student_pred_depth_latent, cond], dim=1)
                             frozen_denoiser_pred_depth_latent_velocity = frozen_denoiser(frozen_denoiser_input, semantics=semantics, timestep=sds_timestep)
                             frozen_denoiser_pred_depth_latent, pred_noise = unwrapped_frozen_denoiser.schedule.convert_from_pred(frozen_denoiser_pred_depth_latent_velocity, 'velocity', noised_student_pred_depth_latent, sds_timestep)
+                            frozen_denoiser_pred_depth = frozen_denoiser_pred_depth_latent + 0.5
 
                             # TODO figure out if the sign should be reversed here
                             score_vector = (pred_noise - noise)
@@ -1287,7 +1308,7 @@ if "__main__" == __name__:
                     high_freq_sds_loss = (score_vector - maybe_blur(score_vector)).abs() * ((1-maybe_blur(l1_error))**2)
                     sds_loss = 0.5 * F.mse_loss(student_pred_depth_latent, high_freq_sds_loss.detach(), reduction="mean")
 
-                    if accelerator.is_main_process and False:
+                    if accelerator.is_main_process and args.log_depth_maps and step % 10 == 0:
                         with torch.no_grad():
 
                             os.makedirs("/tmp/viz", exist_ok=True)
@@ -1301,7 +1322,7 @@ if "__main__" == __name__:
                                 return Image.fromarray(colored_hwc)
                             
                             
-                            sds_score = student_pred_depth_latent - score_vector
+                            sds_score = score_vector
                             sds_score_colored = colorize_internal(sds_score.cpu().numpy(), sds_score.min().item(), sds_score.max().item(), cmap="coolwarm")
                             sds_score_colored.save("/tmp/viz/sds_score.png")
 
@@ -1321,14 +1342,22 @@ if "__main__" == __name__:
 
                             final_depth_colored = colorize_internal(student_pred_depth.cpu().numpy(), student_pred_depth.min().item(), student_pred_depth.max().item(), cmap="coolwarm")
                             final_depth_colored.save("/tmp/viz/final_depth.png")
-                            
+
+                            frozen_denoiser_pred_depth_colored = colorize_internal(frozen_denoiser_pred_depth.cpu().numpy(), frozen_denoiser_pred_depth.min().item(), frozen_denoiser_pred_depth.max().item(), cmap="coolwarm")
+                            frozen_denoiser_pred_depth_colored.save("/tmp/viz/frozen_denoiser_pred_depth.png")
+
+                            # let's concatenate them vertically!
+                            concatenated = np.concatenate([np.array(img) for img in [sds_score_colored, l1_error_colored, weighted_sds_score_colored, base_depth_colored, initial_depth_colored, final_depth_colored, frozen_denoiser_pred_depth_colored]],axis=0)
+                            Image.fromarray(concatenated).save("/tmp/viz/concatenated.png")
+
+                            pass
                             
                     maybe_blur_depth_loss = lambda x: maybe_blur(x) if args.blur_depth_loss else x
-                            
+
                     depth_loss = l1_loss(
-                        maybe_blur_depth_loss(student_pred_depth_latent + 0.5), maybe_blur_depth_loss(x0 + 0.5), torch.ones_like(l1_error)
+                        maybe_blur_depth_loss(student_pred_depth_latent + 0.5), maybe_blur_depth_loss(target_latent + 0.5), torch.ones_like(l1_error)
                     )
-                    depth_mse = F.mse_loss(student_pred_depth_latent + 0.5, x0 + 0.5, reduction="mean")
+                    depth_mse = F.mse_loss(student_pred_depth_latent + 0.5, target_latent + 0.5, reduction="mean")
 
                     with torch.no_grad():
 
@@ -1341,24 +1370,24 @@ if "__main__" == __name__:
                         final_generation_depth = final_generation_latent + 0.5
 
                         final_pred_depth_aligned, _, _ = align_depth_least_square(
-                            gt_arr=(x0 + 0.5).detach().float().cpu().numpy(),
+                            gt_arr=(target_latent + 0.5).detach().float().cpu().numpy(),
                             pred_arr=student_pred_depth.detach().float().cpu().numpy(),
                             valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
                             return_scale_shift=True,
                             max_resolution=None,
                         )
                         final_pred_depth_aligned = torch.from_numpy(final_pred_depth_aligned).to(device)
-                        final_aligned_depth_mse = F.mse_loss(final_pred_depth_aligned, x0 + 0.5, reduction="mean")
+                        final_aligned_depth_mse = F.mse_loss(final_pred_depth_aligned, target_latent + 0.5, reduction="mean")
 
                         final_generation_depth_aligned, _, _ = align_depth_least_square(
-                            gt_arr=(x0 + 0.5).detach().float().cpu().numpy(),
+                            gt_arr=(target_latent + 0.5).detach().float().cpu().numpy(),
                             pred_arr=final_generation_depth.detach().float().cpu().numpy(),
                             valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
                             return_scale_shift=True,
                             max_resolution=None,
                         )
                         final_generation_depth_aligned = torch.from_numpy(final_generation_depth_aligned).to(device)
-                        final_generation_aligned_depth_mse = F.mse_loss(final_generation_depth_aligned, x0 + 0.5, reduction="mean")
+                        final_generation_aligned_depth_mse = F.mse_loss(final_generation_depth_aligned, target_latent + 0.5, reduction="mean")
 
                     # let's also compare our final predicted depth map to a simple baseline: least-squares alignment with the base depth map
 
@@ -1367,7 +1396,7 @@ if "__main__" == __name__:
                         with torch.no_grad():
 
                             frozen_pred_depth_aligned, _, _ = align_depth_least_square(
-                                gt_arr=(x0 + 0.5).detach().float().cpu().numpy(),
+                                gt_arr=(target_latent + 0.5).detach().float().cpu().numpy(),
                                 pred_arr=frozen_pred_depth.detach().float().cpu().numpy(),
                                 valid_mask_arr=torch.ones_like(l1_error).detach().bool().cpu().numpy(),
                                 return_scale_shift=True,
@@ -1376,9 +1405,9 @@ if "__main__" == __name__:
                             frozen_pred_depth_aligned = torch.from_numpy(frozen_pred_depth_aligned).to(device)
 
                             initial_depth_loss = l1_loss(
-                                frozen_pred_depth_aligned, x0 + 0.5, torch.ones_like(l1_error)
+                                maybe_blur_depth_loss(frozen_pred_depth_aligned), maybe_blur_depth_loss(target_latent + 0.5), torch.ones_like(l1_error)
                             )
-                            initial_depth_mse = F.mse_loss(frozen_pred_depth_aligned, x0 + 0.5, reduction="mean")
+                            initial_depth_mse = F.mse_loss(frozen_pred_depth_aligned, target_latent + 0.5, reduction="mean")
 
                 else:
                     raise NotImplementedError(f"Image resizing not implemented for denoiser={sharpdepth_kind}")
