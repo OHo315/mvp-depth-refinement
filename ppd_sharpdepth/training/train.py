@@ -411,6 +411,7 @@ if "__main__" == __name__:
     parser.add_argument("--log_depth_maps", action="store_true", help="Log training depth maps (SDS loss, depth loss, etc.) to disk. Slows down training")
     parser.add_argument("--initialize_ppd_from_timestep", type=int, default=None, help="Timestep to initialize the PPD from")
     parser.add_argument("--max_sds_timestep", type=int, default=None, help="Maximum timestep for the SDS loss")
+    parser.add_argument("--align_depth_least_square", action="store_true", help="Whether to align the depth using least square")
 
     args = parser.parse_args()
 
@@ -1209,7 +1210,83 @@ if "__main__" == __name__:
                                 frozen_pred_depth_aligned, norm_base_depth_unpadded * 0.5 + 0.5, l1_error_unpadded
                             )
                             initial_depth_mse = F.mse_loss(frozen_pred_depth_aligned, norm_base_depth_unpadded * 0.5 + 0.5, reduction="mean")
+                    
+                    with torch.no_grad():
+                        final_aligned_depth, _, _ = align_depth_least_square(
+                            gt_arr=(norm_base_depth_unpadded * 0.5 + 0.5).detach().float().cpu().numpy(),
+                            pred_arr=pred_depth_unpadded.detach().float().cpu().numpy(),
+                            valid_mask_arr=torch.ones_like(l1_error_unpadded).detach().bool().cpu().numpy(),
+                            return_scale_shift=True,
+                            max_resolution=None,
+                        )
+                        final_aligned_depth = torch.from_numpy(final_aligned_depth).to(device)
 
+                        final_aligned_depth_loss = l1_loss(
+                            final_aligned_depth, norm_base_depth_unpadded * 0.5 + 0.5, l1_error_unpadded
+                        )
+                        final_aligned_depth_mse = F.mse_loss(final_aligned_depth, norm_base_depth_unpadded * 0.5 + 0.5, reduction="mean")
+
+                        final_generation_aligned_depth_mse = final_aligned_depth_mse
+                        final_generation_aligned_depth_loss = final_aligned_depth_loss
+
+                    if accelerator.is_main_process and args.log_depth_maps and step % 10 == 0:
+                        with torch.no_grad():
+
+                            os.makedirs("/tmp/viz", exist_ok=True)
+
+                            rgb_viz = (rgb + 1) / 2
+
+                            def colorize_internal(value: np.ndarray, vmin: float = None, vmax: float = None, cmap: str = "magma_r"):
+                                colored = colorize_depth_maps(value.squeeze(0), vmin, vmax, cmap)
+                                colored = (colored * 255).astype(np.uint8)
+                                colored_hwc = chw2hwc(colored.squeeze(0))
+                                return Image.fromarray(colored_hwc)
+                            
+                            score_gradient_latent = score_gradient / vae.config.scaling_factor
+                            score_gradient_z = vae.post_quant_conv(score_gradient_latent.to(weight_dtype))
+                            score_gradient_depth = vae.decoder(score_gradient_z).mean(dim=1, keepdim=True)
+                            sds_score = score_gradient_depth.abs().float()
+                            sds_score_colored = colorize_internal(sds_score.cpu().numpy(), sds_score.min().item(), sds_score.max().item(), cmap="coolwarm")
+                            sds_score_colored.save("/tmp/viz/sds_score.png")
+
+                            l1_error_colored = colorize_internal(l1_error.float().cpu().numpy(), 0, 1, cmap="coolwarm")
+                            l1_error_colored.save("/tmp/viz/l1_error.png")
+
+                            weighted_sds_score = (sds_score * ((1 - l1_error.float())**2)).float()
+                            weighted_sds_score_colored = colorize_internal(weighted_sds_score.cpu().numpy(), weighted_sds_score.min().item(), weighted_sds_score.max().item(), cmap="Greys")
+                            weighted_sds_score_colored.save("/tmp/viz/weighted_sds_score.png")
+
+                            base_depth_colored = colorize_internal(norm_base_depth.float().cpu().numpy(), norm_base_depth.float().min().item(), norm_base_depth.float().max().item(), cmap="coolwarm")
+                            base_depth_colored.save("/tmp/viz/base_depth.png")
+
+                            initial_depth_colored = colorize_internal(frozen_pred_depth.float().cpu().numpy(), frozen_pred_depth.float().min().item(), frozen_pred_depth.float().max().item(), cmap="coolwarm")
+                            initial_depth_colored.save("/tmp/viz/initial_depth.png")
+
+                            final_depth_colored = colorize_internal(pred_depth.float().cpu().numpy(), pred_depth.float().min().item(), pred_depth.float().max().item(), cmap="coolwarm")
+                            final_depth_colored.save("/tmp/viz/final_depth.png")
+
+                            denoiser_pred_latent = denoiser_pred / vae.config.scaling_factor
+                            denoiser_pred_z = vae.post_quant_conv(denoiser_pred_latent.to(weight_dtype))
+                            frozen_denoiser_pred_depth = vae.decoder(denoiser_pred_z).mean(dim=1, keepdim=True).float()
+                            frozen_denoiser_pred_depth_colored = colorize_internal(frozen_denoiser_pred_depth.cpu().numpy(), frozen_denoiser_pred_depth.min().item(), frozen_denoiser_pred_depth.max().item(), cmap="coolwarm")
+                            frozen_denoiser_pred_depth_colored.save("/tmp/viz/frozen_denoiser_pred_depth.png")
+
+                            rgb_img = Image.fromarray(((rgb_viz.float() * 255.0).int().squeeze(0,1).permute(1,2,0).cpu().numpy().astype(np.uint8)))
+
+                            # let's concatenate them vertically!
+                            concatenated = np.concatenate([np.array(img) for img in [
+                                sds_score_colored,
+                                l1_error_colored,
+                                weighted_sds_score_colored,
+                                base_depth_colored,
+                                initial_depth_colored,
+                                final_depth_colored,
+                                frozen_denoiser_pred_depth_colored,
+                                rgb_img,
+                            ]],axis=0)
+                            Image.fromarray(concatenated).save("/tmp/viz/concatenated.png")
+
+                            pass
 
                 
                 elif sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
@@ -1540,6 +1617,7 @@ if "__main__" == __name__:
                                 noise_aware_latent_noise_scale=args.noise_aware_latent_noise_scale,
                                 use_conditioning_for_initial_ppd=args.use_conditioning_for_initial_ppd,
                                 initialize_ppd_from_timestep=args.initialize_ppd_from_timestep,
+                                align_depth_least_square=args.align_depth_least_square,
                             ).to(accelerator.device, dtype=weight_dtype)
                             avg_rmse = 0.0
                             avg_rmse_base = 0.0

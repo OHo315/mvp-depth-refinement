@@ -120,6 +120,7 @@ class SharpDepthPipeline(DiffusionPipeline):
         noise_aware_latent_noise_scale: float = 1.0,
         use_conditioning_for_initial_ppd: bool = False,
         initialize_ppd_from_timestep: Optional[int] = None,
+        align_depth_least_square: Optional[Callable] = None,
     ):
         super().__init__()
 
@@ -169,6 +170,7 @@ class SharpDepthPipeline(DiffusionPipeline):
         self.use_conditioning_for_initial_ppd = use_conditioning_for_initial_ppd
 
         self.initialize_ppd_from_timestep = initialize_ppd_from_timestep
+        self.align_depth_least_square = align_depth_least_square
 
     @torch.no_grad()
     def __call__(
@@ -366,14 +368,16 @@ class SharpDepthPipeline(DiffusionPipeline):
 
         valid_mask = (1 - pred_mask) > 0.5
         
-        # final_pred, scale, shift = align_depth_least_square(
-        #                                                 gt_arr=base_pred,
-        #                                                 pred_arr=final_pred,
-        #                                                 valid_mask_arr=valid_mask,
-        #                                                 return_scale_shift=True,
-        #                                                 max_resolution=None,
-        #                                         )
-        final_pred = final_pred * (normalize_obj['max'].item() - normalize_obj['min'].item()) + normalize_obj['min'].item()
+        if self.align_depth_least_square is not None:
+            final_pred, scale, shift = align_depth_least_square(
+                    gt_arr=base_pred,
+                    pred_arr=final_pred,
+                    valid_mask_arr=valid_mask,
+                    return_scale_shift=True,
+                    max_resolution=None,
+            )
+        else:
+            final_pred = final_pred * (normalize_obj['max'].item() - normalize_obj['min'].item()) + normalize_obj['min'].item()
 
         initial_pred, scale, shift = align_depth_least_square(
                                                         gt_arr=base_pred,
