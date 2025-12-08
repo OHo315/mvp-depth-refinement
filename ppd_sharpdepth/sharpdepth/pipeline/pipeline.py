@@ -377,7 +377,12 @@ class SharpDepthPipeline(DiffusionPipeline):
                     max_resolution=None,
             )
         else:
-            final_pred = final_pred * (normalize_obj['max'].item() - normalize_obj['min'].item()) + normalize_obj['min'].item()
+            if self.sharpdepth_kind == SharpDepthKind.LOTUS:
+                final_pred = (final_pred + 1) / 2 * (normalize_obj['max'].item() - normalize_obj['min'].item()) + normalize_obj['min'].item()
+            elif self.sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
+                final_pred = final_pred * (normalize_obj['max'].item() - normalize_obj['min'].item()) + normalize_obj['min'].item()
+            else:
+                raise NotImplementedError(f"SharpDepthKind {self.sharpdepth_kind} not implemented yet")
 
         initial_pred, scale, shift = align_depth_least_square(
                                                         gt_arr=base_pred,
