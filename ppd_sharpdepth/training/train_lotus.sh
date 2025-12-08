@@ -38,5 +38,4 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --base_model unidepth \
     --denoiser lotus \
     --use_conditioning_probability 0.8 \
-    --align_depth_least_square \
     "$@"

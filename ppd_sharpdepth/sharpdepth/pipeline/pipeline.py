@@ -368,7 +368,7 @@ class SharpDepthPipeline(DiffusionPipeline):
 
         valid_mask = (1 - pred_mask) > 0.5
         
-        if self.align_depth_least_square is not None:
+        if self.align_depth_least_square:
             final_pred, scale, shift = align_depth_least_square(
                     gt_arr=base_pred,
                     pred_arr=final_pred,
