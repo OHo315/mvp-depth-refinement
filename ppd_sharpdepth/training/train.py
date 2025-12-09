@@ -650,7 +650,7 @@ if "__main__" == __name__:
     }[sharpdepth_kind]
 
     denoiser_subfolder = {
-        SharpDepthKind.LOTUS: "unet",
+        SharpDepthKind.LOTUS: "unet_student",
         SharpDepthKind.PIXEL_PERFECT_DEPTH: "ppd_student"
     }[sharpdepth_kind]
     denoiser_cls = {

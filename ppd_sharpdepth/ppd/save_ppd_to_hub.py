@@ -61,5 +61,10 @@ if __name__ == "__main__":
         # rm -rf ppd_student on the branch
         delete_folder(repo_id="andrew-healey/sharpdepth", path_in_repo="ppd_student", revision=branch_name)
         upload_folder(repo_id="andrew-healey/sharpdepth", folder_path=local_folder_name, path_in_repo="ppd_student", revision=branch_name)
+    elif sys.argv[1] == "push_lotus_student":
+        print("Pushing Lotus Student to Hugging Face Hub")
+        from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel
+        model = UNet2DConditionModel.from_pretrained("andrew-healey/sharpdepth", subfolder="unet")
+        model.push_to_hub("andrew-healey/sharpdepth", subfolder="unet_student")
     else:
         raise ValueError(f"Invalid command: {sys.argv[1]}")
