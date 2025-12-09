@@ -1572,10 +1572,10 @@ if "__main__" == __name__:
                             rescaled_normalize_obj = depth_normalizer(rescaled_frozen_pred_depth)
                             norm_rescaled_frozen_pred_depth = rescaled_normalize_obj["norm_depth"] * 0.5 + 0.5
 
-                            rand_rescale_factor = math.exp(random.uniform(math.log(0.25), math.log(4.0))) # uniform in log space
+                            rand_rescale_factor = math.exp(random.uniform(math.log(0.1), math.log(1.0))) # uniform in log space
                             rand_sign_change = random.choice([1, -1])
-                            rand_bias = random.uniform(-0.5, 0.5)
-                            norm_rescaled_frozen_pred_depth = norm_rescaled_frozen_pred_depth * rand_rescale_factor + rand_bias
+                            rand_bias = random.uniform(-0.1, 0.1)
+                            norm_rescaled_frozen_pred_depth = norm_rescaled_frozen_pred_depth * rand_rescale_factor * rand_sign_change + rand_bias
 
                         else:
                             raise NotImplementedError(f"Unknown transformation kind: {transformation_kind}")
