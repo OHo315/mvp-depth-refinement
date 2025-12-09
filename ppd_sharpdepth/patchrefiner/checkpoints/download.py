@@ -53,10 +53,13 @@ def download():
     zip_path = os.path.join(output_dir, download_file)
 
     # Download the zip file from hugging_face
-    hf_id = "OHo315/PatchRefinerCheckpoint"
-    print("Downloading zip file...")
-    zip_path = hf_hub_download(repo_id=hf_id, filename=download_file, cache_dir=output_dir, repo_type="dataset")
-    print("Download complete!")
+    if os.path.exists(zip_path):
+        print("Zip file already downloaded. Skipping download.")
+    else:
+        hf_id = "OHo315/PatchRefinerCheckpoint"
+        print("Downloading zip file...")
+        zip_path = hf_hub_download(repo_id=hf_id, filename=download_file, local_dir=output_dir, local_dir_use_symlinks=False, repo_type="dataset", resume_download=True)
+        print("Download complete!")
 
     print("Extracting ZIP...")
     if not zipfile.is_zipfile(zip_path):
@@ -69,8 +72,9 @@ def download():
     print(f"Extracted zip file to {output_dir}!")
 
     ## Delete ZIP file
+    """
     shutil.rmtree(os.path.join(output_dir, "datasets--OHo315--PatchRefinerCheckpoint"))
     print("ZIP file deleted.")
-
+    """
 if __name__ == "__main__":
     download()
