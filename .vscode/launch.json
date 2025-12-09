@@ -12,6 +12,13 @@
       "pathMappings": [{ "localRoot": "${workspaceFolder}", "remoteRoot": "." }]
     },
     {
+      "name": "Python Debugger: Remote Attach w/ custom port",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": { "host": "localhost", "port": "${input:debug_port}" },
+      "pathMappings": [{ "localRoot": "${workspaceFolder}", "remoteRoot": "." }]
+    },
+    {
       "name": "Train SharpDepth",
       "type": "debugpy",
       "request": "launch",

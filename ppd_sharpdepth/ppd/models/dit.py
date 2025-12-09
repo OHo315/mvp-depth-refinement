@@ -8,7 +8,7 @@ from .patch_embed import PatchEmbed
 from .mlp import Mlp
 from .attention import Attention
 from .rope import RotaryPositionEmbedding2D, PositionGetter
-
+from diffusers import ModelMixin
 
 def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
@@ -103,7 +103,7 @@ class FinalLayer(nn.Module):
         return x
 
 
-class DiT(nn.Module):
+class DiT(ModelMixin):
     """
     Cascade diffusion model with a transformer backbone.
     """
@@ -116,6 +116,7 @@ class DiT(nn.Module):
         depth=24,
         num_heads=16,
         mlp_ratio=4.0,
+        add_zero_convs=False,
     ):
         super().__init__()
         self.in_channels = in_channels
@@ -143,6 +144,18 @@ class DiT(nn.Module):
 
         self.final_layer = FinalLayer(hidden_size, 8, self.out_channels)
         self.initialize_weights()
+
+        self.add_zero_convs = add_zero_convs
+        if self.add_zero_convs:
+            self.initial_zero_conv = nn.Linear(hidden_size, hidden_size)
+            self.zero_convs = nn.ModuleList(
+                [nn.Linear(hidden_size, hidden_size) for _ in range(depth)]
+            )
+
+            for zero_conv in [self.initial_zero_conv, *self.zero_convs]:
+                nn.init.constant_(zero_conv.weight, 0)
+                nn.init.constant_(zero_conv.bias, 0)
+        
 
     def initialize_weights(self):
         # Initialize transformer layers:
@@ -197,6 +210,9 @@ class DiT(nn.Module):
         t: (N,) tensor of diffusion timesteps
         """
 
+        if self.add_zero_convs:
+            raise NotImplementedError("ControlNet-style DiT cannot be inferred on its own. Only works when used in a ControlNetDiT.")
+
         N, C, H, W = x.shape
         if len(timestep.shape) == 0:
             timestep = timestep[None]
@@ -232,3 +248,93 @@ class DiT(nn.Module):
         x = self.unpatchify(x, height=H, width=W)  # (N, out_channels, H, W)
         return x
 
+class ControlNetDiT(ModelMixin):
+    _supports_gradient_checkpointing = True
+
+    def __init__(self, dit, conditioning_dits):
+        super().__init__()
+        self.dit = dit
+        self.conditioning_dits = nn.ModuleList(conditioning_dits)
+        self.gradient_checkpointing = False
+
+        assert not self.dit.add_zero_convs, "ControlNetDiT cannot be used with add_zero_convs=True."
+        assert all([conditioning_dit.add_zero_convs for conditioning_dit in self.conditioning_dits]), "Controlnet conditioning DiTs must be used with add_zero_convs=True."
+
+
+    def forward(self, x, conds, semantics, timestep, dropout=0.1):
+        """
+        Forward pass of SP-DiT.
+        x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
+        t: (N,) tensor of diffusion timesteps
+        """
+
+        assert len(conds) == len(self.conditioning_dits), "Number of conditions must match number of conditioning DiTs."
+        assert all([cond.shape == x.shape for cond in conds]), "All conditions must have the same shape as the input."
+
+        N, C, H, W = x.shape
+        if len(timestep.shape) == 0:
+            timestep = timestep[None]
+
+        pos0 = None
+        pos1 = None
+        if self.dit.rope is not None:
+            pos0 = self.dit.position_getter(N, H // 16, W // 16, device=x.device)
+            pos1 = self.dit.position_getter(N, H // 8, W // 8, device=x.device)
+
+        x_dit = self.dit.x_embedder(x)
+        N, T, D = x_dit.shape
+        t = self.dit.t_embedder(timestep)  # (N, D)
+        
+        x_conditioning = [conditioning_dit.x_embedder(cond) for conditioning_dit, cond in zip(self.conditioning_dits, conds)]
+        x_conditioning = [conditioning_dit.initial_zero_conv(x_conditioning_j) for conditioning_dit, x_conditioning_j in zip(self.conditioning_dits, x_conditioning)]
+
+        # for block in self.blocks:
+        for i, block in enumerate(self.dit.blocks):
+            if self.gradient_checkpointing:
+                x_dit, *x_conditioning = self._gradient_checkpointing_func(self.process_block, t, i, x_dit, x_conditioning, semantics, pos0, pos1, N, H, W, D)
+            else:
+                x_dit, *x_conditioning = self.process_block(t, i, x_dit, x_conditioning, semantics, pos0, pos1, N, H, W, D)
+
+        x_dit = self.dit.final_layer(x_dit, t)  # (N, T, patch_size ** 2 * out_channels)
+        x_dit = self.dit.unpatchify(x_dit, height=H, width=W)  # (N, out_channels, H, W)
+        return x_dit
+    
+    def process_block(self, t, i, x_dit, x_conditioning, semantics, pos0, pos1, N, H, W, D):
+        block = self.dit.blocks[i]
+        if i < 12:
+            x_dit = block(x_dit, t, pos0)  # (N, T, D)
+            x_conditioning = [conditioning_dit.blocks[i](x_conditioning_j, t, pos0) for conditioning_dit, x_conditioning_j in zip(self.conditioning_dits, x_conditioning)]
+        else:
+            x_dit = block(x_dit, t, pos1)  # (N, T, D)
+            x_conditioning = [conditioning_dit.blocks[i](x_conditioning_j, t, pos1) for conditioning_dit, x_conditioning_j in zip(self.conditioning_dits, x_conditioning)  ]
+
+        if i == 11:
+
+            x_dit = self._merge_semantics(x_dit, semantics, self.dit, N, H, W, D)
+            x_conditioning = [self._merge_semantics(x_conditioning_i, semantics, conditioning_dit, N, H, W, D) for x_conditioning_i, conditioning_dit in zip(x_conditioning, self.conditioning_dits)]
+        
+        for (conditioning_dit, x_conditioning_j) in zip(self.conditioning_dits, x_conditioning):
+            x_dit = x_dit + conditioning_dit.zero_convs[i](x_conditioning_j)
+
+        return x_dit, *x_conditioning
+
+
+    @staticmethod
+    def _merge_semantics(x, semantics, dit, N, H, W, D):
+
+        semantics = F.normalize(semantics, dim=-1)
+        x = dit.proj_fusion(torch.cat([x, semantics], dim=-1))
+        p = 16
+        x = x.reshape(shape=(N, H//p, W//p, 2, 2, D))
+        x = torch.einsum("nhwpqc->nchpwq", x)
+        x = x.reshape(shape=(N, D, (H//p)*2, (W//p)*2))
+        x = x.flatten(2).transpose(1, 2)
+        return x
+    
+    def requires_grad_(self, value):
+        for param in self.dit.parameters():
+            param.requires_grad = False
+        for conditioning_dit in self.conditioning_dits:
+            for param in conditioning_dit.parameters():
+                param.requires_grad = value
+        return self

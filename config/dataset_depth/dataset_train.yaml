@@ -17,13 +17,13 @@ dataset:
     #   resize_to_hw:
     #   - 480
     #   - 640 
-    - name: waymo
-      disp_name: waymo
-      dir: waymo_preprocess/
-      filenames: data_split/waymo_depth/waymo_train_filename_list.txt
-      resize_to_hw:
-      - 480
-      - 640 
+    # - name: waymo
+    #   disp_name: waymo
+    #   dir: waymo_preprocess/
+    #   filenames: data_split/waymo_depth/waymo_train_filename_list.txt
+    #   resize_to_hw:
+    #   - 480
+    #   - 640 
     - name: diode_indoor
       disp_name: diode_indoor
       dir: diode/

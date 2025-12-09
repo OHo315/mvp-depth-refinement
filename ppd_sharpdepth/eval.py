@@ -94,6 +94,7 @@ if __name__ == "__main__":
     total_rmse = 0.0
     total_ppd = 0.0
     total_valid_examples = 0
+    total_valid_ppd_examples= 0
 
     # computing edge metric requires intrinsic data and high quality edges (from synthetic data), and hypersim is the only supported dataset which meets these requirements.
     with_edge_metric = cfg_data.name == "hypersim_depth"
@@ -119,7 +120,10 @@ if __name__ == "__main__":
         if with_edge_metric:
             intrinsics_ts = data["intrinsics"].squeeze()
             intrinsics = intrinsics_ts.numpy()
-            total_ppd += ppd_metric(depth_pred, depth_raw, intrinsics)
+            ppd_score = ppd_metric(depth_pred, depth_raw, intrinsics)
+            if ppd_score > 0:
+                total_ppd += ppd_metric(depth_pred, depth_raw, intrinsics)
+                total_valid_ppd_examples += 1
         
         # DEBUG NORMAL MAPS VIA VISUALISATION.
         #predicted_edge_path = BASE_PREDS_DIR / cfg_data.dir / model_architecture.value / (rgb_name + "_pred_edges.png")
@@ -141,7 +145,7 @@ if __name__ == "__main__":
         "run_message": run_message,
         "abs_rel": total_abs_rel / total_valid_examples,
         "rmse": total_rmse / total_valid_examples,
-        "ppd": total_ppd / total_valid_examples ,
+        "ppd": total_ppd / total_valid_ppd_examples ,
     }
     df = pd.concat([df, pd.DataFrame([metrics])])
     df.to_csv(results_filepath, index=False)
