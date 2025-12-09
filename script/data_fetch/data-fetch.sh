@@ -1,5 +1,6 @@
 #!/bin/bash
 pip install unzip
+source set-env.sh
 
 bash ./script/data_fetch/hypersim-hf.sh &
 bash ./script/data_fetch/nyu.sh &
