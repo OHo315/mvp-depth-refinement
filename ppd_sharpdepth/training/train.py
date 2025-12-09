@@ -1571,6 +1571,12 @@ if "__main__" == __name__:
                             
                             rescaled_normalize_obj = depth_normalizer(rescaled_frozen_pred_depth)
                             norm_rescaled_frozen_pred_depth = rescaled_normalize_obj["norm_depth"] * 0.5 + 0.5
+
+                            rand_rescale_factor = math.exp(random.uniform(math.log(0.25), math.log(4.0))) # uniform in log space
+                            rand_sign_change = random.choice([1, -1])
+                            rand_bias = random.uniform(-0.5, 0.5)
+                            norm_rescaled_frozen_pred_depth = norm_rescaled_frozen_pred_depth * rand_rescale_factor + rand_bias
+
                         else:
                             raise NotImplementedError(f"Unknown transformation kind: {transformation_kind}")
                         
@@ -1616,6 +1622,70 @@ if "__main__" == __name__:
                         
                         final_generation_aligned_depth_mse = final_aligned_depth_mse
 
+                    if accelerator.is_main_process and args.log_depth_maps and step % 10 == 0:
+                        with torch.no_grad():
+
+                            os.makedirs("/tmp/viz", exist_ok=True)
+
+                            Image.fromarray(((rgb * 255.0).int().squeeze(0,1).permute(1,2,0).cpu().numpy().astype(np.uint8))).save("/tmp/viz_rgb.png")
+
+                            def colorize_internal(value: np.ndarray, vmin: float = None, vmax: float = None, cmap: str = "magma_r"):
+                                colored = colorize_depth_maps(value.squeeze(0), vmin, vmax, cmap)
+                                colored = (colored * 255).astype(np.uint8)
+                                colored_hwc = chw2hwc(colored.squeeze(0))
+                                return Image.fromarray(colored_hwc)
+                            
+                            
+                            # sds_score = score_vector.abs()
+                            # sds_score_colored = colorize_internal(sds_score.cpu().numpy(), sds_score.min().item(), sds_score.max().item(), cmap="coolwarm")
+                            # sds_score_colored.save("/tmp/viz/sds_score.png")
+
+                            # l1_error_colored = colorize_internal(maybe_blur(l1_error).cpu().numpy(), 0, 1, cmap="coolwarm")
+                            # l1_error_colored.save("/tmp/viz/l1_error.png")
+                            # print("l1_error.min(), l1_error.max()", l1_error.min().item(), l1_error.max().item())
+
+                            # weighted_sds_score = (sds_score - maybe_blur(sds_score)).abs() * ((1-maybe_blur(l1_error))**2)
+                            # weighted_sds_score_colored = colorize_internal(weighted_sds_score.cpu().numpy(), weighted_sds_score.min().item(), weighted_sds_score.max().item(), cmap="Greys")
+                            # weighted_sds_score_colored.save("/tmp/viz/weighted_sds_score.png")
+
+                            # base_depth_colored = colorize_internal(norm_base_depth.float().cpu().numpy(), norm_base_depth.min().item(), norm_base_depth.max().item(), cmap="coolwarm")
+                            # base_depth_colored.save("/tmp/viz/base_depth.png")
+
+                            initial_depth_colored = colorize_internal(frozen_pred_depth.cpu().numpy(), frozen_pred_depth.min().item(), frozen_pred_depth.max().item(), cmap="coolwarm")
+                            initial_depth_colored.save("/tmp/viz/initial_depth.png")
+
+                            norm_rescaled_frozen_pred_depth_colored = colorize_internal(norm_rescaled_frozen_pred_depth.cpu().numpy(), norm_rescaled_frozen_pred_depth.min().item(), norm_rescaled_frozen_pred_depth.max().item(), cmap="coolwarm")
+                            norm_rescaled_frozen_pred_depth_colored.save("/tmp/viz/norm_rescaled_frozen_pred_depth.png")
+
+                            blurred_norm_rescaled_frozen_pred_depth_colored = colorize_internal(blurred_norm_rescaled_frozen_pred_depth.cpu().numpy(), blurred_norm_rescaled_frozen_pred_depth.min().item(), blurred_norm_rescaled_frozen_pred_depth.max().item(), cmap="coolwarm")
+                            blurred_norm_rescaled_frozen_pred_depth_colored.save("/tmp/viz/blurred_norm_rescaled_frozen_pred_depth.png")
+
+                            diff = blurred_norm_rescaled_frozen_pred_depth - norm_rescaled_frozen_pred_depth
+                            diff_colored = colorize_internal(diff.cpu().numpy(), diff.min().item(), diff.max().item(), cmap="coolwarm")
+                            diff_colored.save("/tmp/viz/diff.png")
+
+                            final_depth_colored = colorize_internal(student_pred_depth.cpu().numpy(), student_pred_depth.min().item(), student_pred_depth.max().item(), cmap="coolwarm")
+                            final_depth_colored.save("/tmp/viz/final_depth.png")
+
+                            # frozen_denoiser_pred_depth_colored = colorize_internal(frozen_denoiser_pred_depth.cpu().numpy(), frozen_denoiser_pred_depth.min().item(), frozen_denoiser_pred_depth.max().item(), cmap="coolwarm")
+                            # frozen_denoiser_pred_depth_colored.save("/tmp/viz/frozen_denoiser_pred_depth.png")
+
+                            # sds_input_depth = colorize_internal()
+
+                            rgb_img = Image.fromarray(((rgb * 255.0).int().squeeze(0,1).permute(1,2,0).cpu().numpy().astype(np.uint8)))
+
+                            # let's concatenate them vertically!
+                            concatenated = np.concatenate([np.array(img) for img in [
+                                initial_depth_colored,
+                                norm_rescaled_frozen_pred_depth_colored,
+                                blurred_norm_rescaled_frozen_pred_depth_colored,
+                                diff_colored,
+                                final_depth_colored,
+                                rgb_img,
+                            ]],axis=0)
+                            Image.fromarray(concatenated).save("/tmp/viz/concatenated.png")
+
+                            pass
 
                 else:
                     raise NotImplementedError(f"Image resizing not implemented for denoiser={sharpdepth_kind}")
