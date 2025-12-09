@@ -394,7 +394,7 @@ if "__main__" == __name__:
     )
     parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA model.")
     parser.add_argument("--base_model", type=str, default="unidepth", help="Base model to use for depth estimation. Options: unidepth, depth_anything_small, depth_anything_large, pixel_perfect_depth")
-    parser.add_argument("--denoiser", type=str, default="lotus", help="Which model constitutes SharpDepth. Options: lotus, pixel_perfect_depth")
+    parser.add_argument("--denoiser", type=str, default="lotus", help="Which model constitutes SharpDepth. Options: lotus, pixel_perfect_depth, pixel_perfect_depth_controlnet")
     parser.add_argument("--use_conditioning_probability", type=float, default=0.8, help="Probability of using conditioning in the student denoiser")
     parser.add_argument("--wandb_name", type=str, default="", help="Name of the wandb run")
     parser.add_argument("--debug", action="store_true", help="Debug mode")
@@ -646,16 +646,19 @@ if "__main__" == __name__:
 
     frozen_denoiser_subfolder = {
         SharpDepthKind.LOTUS: "unet",
-        SharpDepthKind.PIXEL_PERFECT_DEPTH: "ppd"
+        SharpDepthKind.PIXEL_PERFECT_DEPTH: "ppd",
+        SharpDepthKind.PIXEL_PERFECT_DEPTH_CONTROLNET: "ppd"
     }[sharpdepth_kind]
 
     denoiser_subfolder = {
         SharpDepthKind.LOTUS: "unet_student",
-        SharpDepthKind.PIXEL_PERFECT_DEPTH: "ppd_student"
+        SharpDepthKind.PIXEL_PERFECT_DEPTH: "ppd_student",
+        SharpDepthKind.PIXEL_PERFECT_DEPTH_CONTROLNET: "ppd_student_controlnet"
     }[sharpdepth_kind]
     denoiser_cls = {
         SharpDepthKind.LOTUS: UNet2DConditionModel,
-        SharpDepthKind.PIXEL_PERFECT_DEPTH: PixelPerfectDepth
+        SharpDepthKind.PIXEL_PERFECT_DEPTH: PixelPerfectDepth,
+        SharpDepthKind.PIXEL_PERFECT_DEPTH_CONTROLNET: PixelPerfectDepth
     }[sharpdepth_kind]
 
     frozen_denoiser = denoiser_cls.from_pretrained(
@@ -670,8 +673,6 @@ if "__main__" == __name__:
         student_ckpt_dir, subfolder=denoiser_subfolder, revision=student_ckpt_dir_revision
     )
     student_denoiser.requires_grad_(True)
-    if sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
-        student_denoiser.semantics_encoder.requires_grad_(False)
     
     def disable_dropout(model):
         for module in model.modules():
@@ -1033,8 +1034,13 @@ if "__main__" == __name__:
 
                 rgb = batch["rgb_int"].to(weight_dtype) / 255.0
 
-                assert sharpdepth_kind in [SharpDepthKind.LOTUS, SharpDepthKind.PIXEL_PERFECT_DEPTH], f"Invalid sharpdepth kind: {sharpdepth_kind}"
-                preprocessor = MarigoldPreProcessor if sharpdepth_kind == SharpDepthKind.LOTUS else PixelPerfectDepthPreProcessor
+                assert sharpdepth_kind in [SharpDepthKind.LOTUS, SharpDepthKind.PIXEL_PERFECT_DEPTH, SharpDepthKind.PIXEL_PERFECT_DEPTH_CONTROLNET], f"Invalid sharpdepth kind: {sharpdepth_kind}"
+                sharpdepth_kind_to_preprocessor = {
+                    SharpDepthKind.LOTUS: MarigoldPreProcessor,
+                    SharpDepthKind.PIXEL_PERFECT_DEPTH: PixelPerfectDepthPreProcessor,
+                    SharpDepthKind.PIXEL_PERFECT_DEPTH_CONTROLNET: PixelPerfectDepthPreProcessor,
+                }
+                preprocessor = sharpdepth_kind_to_preprocessor[sharpdepth_kind]
                 rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(batch["rgb_int"], device, weight_dtype)
                 rgb_int_1chw_resized = (rgb_float_1chw_resized * 255.0).to(batch["rgb_int"].dtype)
                 batch_resized = {
@@ -1515,6 +1521,102 @@ if "__main__" == __name__:
                             )
                             initial_depth_mse = F.mse_loss(frozen_pred_depth_aligned, target_latent + 0.5, reduction="mean")
 
+                elif sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH_CONTROLNET:
+                    # infer the frozen ppd on the image
+                    # apply some arb. rescaling to the ppd depth map, e.g. linear or log(linear(exp() + 1)) - 1
+                    # and blur it
+                    # then perform simple diffusion towards the rescaled depth map!
+
+                    conditioning_kind = "cond"
+
+                    def blur(x_11hw, scale_factor):
+                        if args.gaussian_blur:
+                            return TV_F.gaussian_blur(x_11hw, kernel_size=2*(scale_factor//2)+1, sigma=scale_factor/2)
+                        else:
+                            small_h = x_11hw.shape[2] // scale_factor
+                            small_w = x_11hw.shape[3] // scale_factor
+                            downscaled = F.interpolate(x_11hw, size=(small_h, small_w), mode="area")
+                            upscaled = F.interpolate(downscaled, size=(x_11hw.shape[2], x_11hw.shape[3]), mode="bilinear")
+                            return upscaled
+                    
+                    def maybe_blur(x_11hw):
+                        if args.blur_unidepth_output_ratio != 1:
+                            return blur(x_11hw, args.blur_unidepth_output_ratio)
+                        else:
+                            return x_11hw
+                            
+                    # infer ppd
+                    with torch.no_grad():
+                        cond = rgb - 0.5
+                        noise = torch.randn(size=[cond.shape[0], 1, cond.shape[2], cond.shape[3]]).to(device)
+
+                        timesteps = unwrapped_student_denoiser.sampling_timesteps
+                        latent = noise
+
+                        with torch.autocast(device.type,dtype=weight_dtype):
+                            semantics = unwrapped_frozen_denoiser.semantics_prompt(rgb)
+                            for timestep in timesteps:
+                                input = torch.cat([latent, cond], dim=1)
+                                pred = unwrapped_frozen_denoiser(x=input, semantics=semantics, timestep=timestep)
+                                latent = unwrapped_student_denoiser.sampler.step(pred=pred, x_t=latent, t=timestep)
+                            frozen_pred_depth = latent + 0.5
+                    
+                        # now transform it!
+                        transformation_kinds = ["log_rescale"]
+                        transformation_kind = random.choice(transformation_kinds)
+                        if transformation_kind == "log_rescale":
+                            rand_rescale_factor = math.exp(random.uniform(math.log(0.1), math.log(10.0))) # uniform in log space
+                            # ppd operates in log-space. normalized ppd latent = log(depth + 1). to avoid discontinuities at depth~=zero.
+                            rescaled_frozen_pred_depth = torch.log((torch.exp(frozen_pred_depth) - 1) * rand_rescale_factor + 1)
+                            
+                            rescaled_normalize_obj = depth_normalizer(rescaled_frozen_pred_depth)
+                            norm_rescaled_frozen_pred_depth = rescaled_normalize_obj["norm_depth"] * 0.5 + 0.5
+                        else:
+                            raise NotImplementedError(f"Unknown transformation kind: {transformation_kind}")
+                        
+                        # now blur it!
+                        blurred_norm_rescaled_frozen_pred_depth = maybe_blur(norm_rescaled_frozen_pred_depth)
+                    
+                    # now perform simple diffusion towards the rescaled depth map!
+                    timestep = unwrapped_student_denoiser.sampling_timesteps[random.randrange(0, len(unwrapped_student_denoiser.sampling_timesteps))]
+
+                    x0 = norm_rescaled_frozen_pred_depth - 0.5
+                    xT = torch.randn_like(noise)
+                    xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
+
+                    student_dit_input = torch.cat([xt, cond], dim=1)
+                    cond_inputs = [
+                        torch.cat([blurred_norm_rescaled_frozen_pred_depth - 0.5, cond], dim=1),
+                        torch.cat([frozen_pred_depth - 0.5, cond], dim=1),
+                    ]
+
+                    with torch.autocast(device.type,dtype=weight_dtype):
+                        student_pred_depth_latent_velocity = student_denoiser(x=student_dit_input, conds=cond_inputs, semantics=semantics, timestep=timestep)
+                        student_pred_depth_latent, _ = unwrapped_student_denoiser.schedule.convert_from_pred(student_pred_depth_latent_velocity, 'velocity', xt, timestep)
+                        student_pred_depth = student_pred_depth_latent + 0.5
+                    
+                    depth_loss = F.mse_loss(student_pred_depth, norm_rescaled_frozen_pred_depth, reduction="mean")
+                    sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
+
+                    # set variables needed for logging+visualization
+                    depth_mse = depth_loss
+                    initial_depth_loss = None
+                    initial_depth_mse = None
+                    
+                    with torch.no_grad():
+                        final_pred_depth_aligned, _, _ = align_depth_least_square(
+                            gt_arr=norm_rescaled_frozen_pred_depth.detach().float().cpu().numpy(),
+                            pred_arr=student_pred_depth.detach().float().cpu().numpy(),
+                            valid_mask_arr=torch.ones_like(student_pred_depth).detach().bool().cpu().numpy(),
+                            return_scale_shift=True,
+                            max_resolution=None,
+                        )
+                        final_pred_depth_aligned = torch.from_numpy(final_pred_depth_aligned).to(device)
+                        final_aligned_depth_mse = F.mse_loss(final_pred_depth_aligned, norm_rescaled_frozen_pred_depth, reduction="mean")
+                        
+                        final_generation_aligned_depth_mse = final_aligned_depth_mse
+
+
                 else:
                     raise NotImplementedError(f"Image resizing not implemented for denoiser={sharpdepth_kind}")
 
@@ -1596,11 +1698,13 @@ if "__main__" == __name__:
                             default_denoising_steps = {
                                 SharpDepthKind.LOTUS: 1,
                                 SharpDepthKind.PIXEL_PERFECT_DEPTH: 4,
+                                SharpDepthKind.PIXEL_PERFECT_DEPTH_CONTROLNET: 4,
                             }[sharpdepth_kind]
 
                             default_processing_resolution = {
                                 SharpDepthKind.LOTUS: 768,
                                 SharpDepthKind.PIXEL_PERFECT_DEPTH: 1024,
+                                SharpDepthKind.PIXEL_PERFECT_DEPTH_CONTROLNET: 1024,
                             }[sharpdepth_kind]
 
                             pipeline = SharpDepthPipeline.from_pretrained(

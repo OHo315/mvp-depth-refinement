@@ -12,7 +12,7 @@ from ppd_sharpdepth.ppd.utils.sampler import EulerSampler
 from ppd_sharpdepth.ppd.utils.transform import image2tensor, resize_1024, resize_1024_crop, resize_keep_aspect
 
 from ppd_sharpdepth.ppd.models.depth_anything_v2.dpt import DepthAnythingV2
-from ppd_sharpdepth.ppd.models.dit import DiT
+from ppd_sharpdepth.ppd.models.dit import ControlNetDiT, DiT
 
 from huggingface_hub import PyTorchModelHubMixin
 from diffusers import ConfigMixin, ModelMixin
@@ -20,6 +20,7 @@ from diffusers import ConfigMixin, ModelMixin
 from typing import List, Any, Dict, Union, Optional
 
 class PixelPerfectDepth(ModelMixin, ConfigMixin):
+    _supports_gradient_checkpointing = True
     config_name = "config.json"
 
     def __init__(
@@ -30,6 +31,7 @@ class PixelPerfectDepth(ModelMixin, ConfigMixin):
         depth_anything_v2_features:int=256,
         depth_anything_v2_out_channels:List[int]=[256, 512, 1024, 1024],
         dit_in_channels:int=4,
+        num_control_nets:int=0,
     ):
         super(PixelPerfectDepth, self).__init__()
 
@@ -42,7 +44,10 @@ class PixelPerfectDepth(ModelMixin, ConfigMixin):
         if semantics_pth is not None:
             self.semantics_encoder.load_state_dict(torch.load(semantics_pth, map_location='cpu'), strict=False)
         self.semantics_encoder = self.semantics_encoder.eval()
-        self.dit = DiT(in_channels=dit_in_channels)
+        if num_control_nets > 0:
+            self.dit = ControlNetDiT(DiT(in_channels=dit_in_channels), [DiT(in_channels=dit_in_channels, add_zero_convs=True) for _ in range(num_control_nets)])
+        else:
+            self.dit = DiT(in_channels=dit_in_channels)
 
         self.sampling_steps = sampling_steps
 
@@ -63,7 +68,8 @@ class PixelPerfectDepth(ModelMixin, ConfigMixin):
             depth_anything_v2_encoder=depth_anything_v2_encoder,
             depth_anything_v2_features=depth_anything_v2_features,
             depth_anything_v2_out_channels=depth_anything_v2_out_channels,
-            dit_in_channels=dit_in_channels
+            dit_in_channels=dit_in_channels,
+            num_control_nets=num_control_nets,
         )
     
     @torch.no_grad()
@@ -78,6 +84,9 @@ class PixelPerfectDepth(ModelMixin, ConfigMixin):
     
     @torch.no_grad()
     def forward_test(self, image_rgb_1chw):
+
+        if self.config.num_control_nets > 0:
+            raise NotImplementedError("ControlNet-style PPD not implemented yet for forward_test")
 
         semantics = self.semantics_prompt(image_rgb_1chw)
         cond = image_rgb_1chw - 0.5
@@ -100,3 +109,8 @@ class PixelPerfectDepth(ModelMixin, ConfigMixin):
     # we define forward() to just be .dit() since .dit is the only trainable part of the network
     def forward(self, *args, **kwargs):
         return self.dit(*args, **kwargs)
+    
+    def requires_grad_(self, value):
+        self.semantics_encoder.requires_grad_(False)
+        self.dit.requires_grad_(value)
+        return self

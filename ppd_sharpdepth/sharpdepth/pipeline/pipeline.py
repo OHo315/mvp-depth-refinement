@@ -126,7 +126,7 @@ class SharpDepthPipeline(DiffusionPipeline):
 
         if not frozen_unet:
 
-            if sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
+            if sharpdepth_kind in [SharpDepthKind.PIXEL_PERFECT_DEPTH, SharpDepthKind.PIXEL_PERFECT_DEPTH_CONTROLNET]:
                 raise ValueError("No frozen PPD denoiser provided. Bad news!")
             elif sharpdepth_kind == SharpDepthKind.LOTUS:
                 print("\n"*20+"WARN: No frozen unet provided, using the student unet")
@@ -345,6 +345,67 @@ class SharpDepthPipeline(DiffusionPipeline):
                     pred = self.unet.dit(x=student_input, semantics=semantics, timestep=timestep)
                     latent = self.unet.sampler.step(pred=pred, x_t=latent, t=timestep)
                 student_pred_depth = latent + 0.5
+        
+        elif self.sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH_CONTROLNET:
+            depth_base = depth_base_11hw = self.base_depth_estimator_fn(rgb_int_1chw, PixelPerfectDepthPreProcessor, internal=True)
+            rgb_float_1chw_resized, padding, original_resolution = PixelPerfectDepthPreProcessor.run(rgb_int_1chw, self.device, self.dtype)
+
+            normalize_obj = self.depth_normalizer(depth_base_11hw)
+            norm_base_depth = normalize_obj["norm_depth"].to(dtype=self.unet.dtype)
+            norm_base_depth = norm_base_depth * 0.5 + 0.5
+
+            # initial PPD
+            cond = rgb_float_1chw_resized - 0.5
+            noise = torch.randn(size=[cond.shape[0], 1, cond.shape[2], cond.shape[3]]).to(self.device)
+            with torch.autocast(self.device.type,dtype=self.unet.dtype):
+                semantics = self.frozen_unet.semantics_prompt(rgb_float_1chw_resized)
+                latent = noise
+                for timestep in self.frozen_unet.sampling_timesteps:
+                    input = torch.cat([latent, cond], dim=1)
+                    pred = self.frozen_unet.dit(x=input, semantics=semantics, timestep=timestep)
+                    latent = self.frozen_unet.sampler.step(pred=pred, x_t=latent, t=timestep)
+                initial_pred = latent + 0.5
+        
+            # compute difference mask
+            l1_error = torch.abs(initial_pred - norm_base_depth)
+            l1_error = l1_error / l1_error.max()
+            l1_error = l1_error.clip(0, 1)
+            l1_mask = l1_error
+
+            scaled_l1_mask = l1_mask * self.noise_aware_latent_noise_scale
+            # noisy_depth_cond = (norm_base_depth - 0.5) * (1 - scaled_l1_mask) + (torch.randn_like(norm_base_depth) * scaled_l1_mask)
+
+            # PPD with controlnet
+
+            # let's blur the base prediction!
+            def blur(x_11hw, scale_factor):
+                return TV_F.gaussian_blur(x_11hw, kernel_size=2*(scale_factor//2)+1, sigma=scale_factor/2)
+            def maybe_blur(x_11hw):
+                assert self.blur_difference_map_scale_factor > 1, f"blur_difference_map_scale_factor must be greater than 1, got {self.blur_difference_map_scale_factor}"
+                return blur(x_11hw, self.blur_difference_map_scale_factor)
+            blurred_base_depth = maybe_blur(norm_base_depth)
+
+            noise = torch.randn_like(noise)
+            cond_inputs = [
+                torch.cat([
+                    blurred_base_depth - 0.5,
+                    cond,
+                ], dim=1),
+                torch.cat([
+                    initial_pred - 0.5,
+                    cond,
+                ], dim=1),
+            ]
+
+            timesteps = torch.tensor(self.unet.sampling_timesteps,device=self.device,dtype=self.unet.dtype)
+            latent = noise
+
+            with torch.autocast(self.device.type,dtype=self.unet.dtype):
+                for timestep in timesteps:
+                    student_input = torch.cat([latent, cond], dim=1)
+                    pred = self.unet.dit(x=student_input, conds=cond_inputs, semantics=semantics, timestep=timestep)
+                    latent = self.unet.sampler.step(pred=pred, x_t=latent, t=timestep)
+                student_pred_depth = latent + 0.5
             
         else:
             raise NotImplementedError(f"SharpDepthKind {self.sharpdepth_kind} not implemented yet")
@@ -379,7 +440,7 @@ class SharpDepthPipeline(DiffusionPipeline):
         else:
             if self.sharpdepth_kind == SharpDepthKind.LOTUS:
                 final_pred = (final_pred + 1) / 2 * (normalize_obj['max'].item() - normalize_obj['min'].item()) + normalize_obj['min'].item()
-            elif self.sharpdepth_kind == SharpDepthKind.PIXEL_PERFECT_DEPTH:
+            elif self.sharpdepth_kind in [SharpDepthKind.PIXEL_PERFECT_DEPTH, SharpDepthKind.PIXEL_PERFECT_DEPTH_CONTROLNET]:
                 final_pred = final_pred * (normalize_obj['max'].item() - normalize_obj['min'].item()) + normalize_obj['min'].item()
             else:
                 raise NotImplementedError(f"SharpDepthKind {self.sharpdepth_kind} not implemented yet")
