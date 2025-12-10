@@ -1728,7 +1728,7 @@ if "__main__" == __name__:
                         raise ValueError(f"Unknown conditioning kind: {conditioning_kind}")
 
                     # let's just use an edge loss as our sds loss.
-                    high_frequency_initial_depth = initial_depth - blur(initial_depth, args.edge_loss_blur_radius)
+                    high_frequency_initial_depth = frozen_pred_depth - blur(frozen_pred_depth, args.edge_loss_blur_radius)
                     high_frequency_student_pred_depth = student_pred_depth - blur(student_pred_depth, args.edge_loss_blur_radius)
 
                     is_near_edge_mask = torch.logical_not(is_far_from_edges_mask)
