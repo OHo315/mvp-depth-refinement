@@ -478,6 +478,7 @@ if "__main__" == __name__:
     parser.add_argument("--depth_loss_away_from_edges_threshold_px", type=int, default=30, help="Threshold in pixels for the depth loss away from edges")
     parser.add_argument("--use_synthetic_conditioning_probability", type=float, default=1.0, help="Probability of using synthetic conditioning (for PPD_controlnet)")
     parser.add_argument("--forward_diffuse_from_initial_pred_depth_probability", type=float, default=1.0, help="Probability of using initial pred depth for forward diffusion. Only used if forward_diffuse_from is initial_pred_depth.")
+    parser.add_argument("--edge_loss_blur_radius_px", type=int, default=8, help="Radius in pixels for the edge loss blur")
 
     args = parser.parse_args()
 
@@ -1728,10 +1729,10 @@ if "__main__" == __name__:
                         raise ValueError(f"Unknown conditioning kind: {conditioning_kind}")
 
                     # let's just use an edge loss as our sds loss.
-                    high_frequency_initial_depth = frozen_pred_depth - blur(frozen_pred_depth, args.edge_loss_blur_radius)
-                    high_frequency_student_pred_depth = student_pred_depth - blur(student_pred_depth, args.edge_loss_blur_radius)
+                    high_frequency_initial_depth = frozen_pred_depth - blur(frozen_pred_depth, args.edge_loss_blur_radius_px)
+                    high_frequency_student_pred_depth = student_pred_depth - blur(student_pred_depth, args.edge_loss_blur_radius_px)
 
-                    is_near_edge_mask = torch.logical_not(is_far_from_edges_mask)
+                    is_near_edge_mask = get_dilated_edge_mask(student_pred_depth, distance_threshold_px=args.edge_loss_blur_radius_px)
                     edge_loss = F.mse_loss(high_frequency_initial_depth * is_near_edge_mask, high_frequency_student_pred_depth * is_near_edge_mask, reduction="mean").to(weight_dtype) / (is_near_edge_mask.float().mean() + 1e-6)
                     sds_loss = edge_loss
 
