@@ -6,9 +6,12 @@ echo $WORKSPACE_DIR
 echo $PYTHONPATH
 
 num_gpus=$NUM_GPUS
-macrobatch_size=1
+macrobatch_size=8
 
 gradient_accumulation_steps=$((macrobatch_size / num_gpus))
+
+# to resume:
+# --learning_rate=1e-6 --student_ckpt_dir_revision reverse-simple-transformation
 
 accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --sds_loss_weight 0.0 \
@@ -24,7 +27,7 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --lr_scheduler cosine \
     --lr_warmup_steps 100 \
     --tracker_project_name ppd_sharpdepth_controlnet_train \
-    --wandb_name "controlnet_1_gpu_lr_1e-5" \
+    --wandb_name "controlnet_8_gpus_lr_1e-5_no_flip_sign" \
     --set_grads_to_none \
     --checkpointing_steps 500 \
     --validation_steps 200 \
@@ -42,4 +45,9 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --blur_unidepth_output_ratio 64 \
     --noise_aware_latent_noise_scale 0.0 \
     --gradient_checkpointing \
+    --log_depth_maps \
+    --depth_loss_away_from_edges_threshold_px 16 \
+    --forward_diffuse_from initial_pred_depth \
+    --forward_diffuse_from_initial_pred_depth_probability 0.25 \
+    --use_synthetic_conditioning_probability 1.0 \
     "$@"

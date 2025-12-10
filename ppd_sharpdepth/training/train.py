@@ -71,6 +71,7 @@ from ppd_sharpdepth.ppd.models.ppd import PixelPerfectDepth
 import torchvision.transforms.functional as TV_F
 
 import wandb
+import cv2
 
 logger = get_logger(__name__)
 
@@ -171,6 +172,67 @@ def colorize(value: np.ndarray, vmin: float = None, vmax: float = None, cmap: st
     value[invalid_mask] = 0
     img = value[..., :3]
     return img
+
+def auto_canny_depth_otsu(depth_map, apertureSize=3, L2gradient=False, dilate_kernel=0, low_frac=0.5):
+    """
+    Automatic Canny edge detection using Otsu thresholding on gradient magnitudes.
+
+    Parameters:
+        depth_map : 2D numpy array (depth values, any range)
+        apertureSize : Sobel kernel size (3,5,7)
+        L2gradient : whether to use L2 norm for gradient magnitude
+        dilate_kernel : optional, size of square kernel to dilate edges after detection
+        low_frac : fraction of high threshold to use as low threshold (default 0.5)
+
+    Returns:
+        edges : binary edge map (uint8, 0 or 255)
+        threshold1, threshold2 : thresholds used
+    """
+    # 1. Normalize depth map to 0-255 uint8
+    depth_norm = np.clip(depth_map, np.min(depth_map), np.max(depth_map))
+    depth_uint8 = ((depth_norm - np.min(depth_norm)) / (np.max(depth_norm) - np.min(depth_norm)) * 255).astype(np.uint8)
+
+    # 2. Compute gradient magnitude using Sobel
+    grad_x = cv2.Sobel(depth_uint8, cv2.CV_64F, 1, 0, ksize=apertureSize)
+    grad_y = cv2.Sobel(depth_uint8, cv2.CV_64F, 0, 1, ksize=apertureSize)
+    
+    if L2gradient:
+        grad_mag = np.sqrt(grad_x**2 + grad_y**2)
+    else:
+        grad_mag = np.abs(grad_x) + np.abs(grad_y)
+
+    # 3. Otsu threshold on gradient magnitude
+    grad_uint8 = np.clip((grad_mag / grad_mag.max() * 255), 0, 255).astype(np.uint8)
+    threshold2, _ = cv2.threshold(grad_uint8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Convert to native Python floats
+    threshold2 = float(threshold2)
+    threshold1 = float(low_frac * threshold2)
+
+    # 4. Run Canny
+    edges = cv2.Canny(depth_uint8, threshold1, threshold2,
+                     apertureSize=apertureSize, L2gradient=L2gradient)
+
+    # 5. Optional dilation
+    if dilate_kernel and dilate_kernel > 0:
+        kernel = np.ones((dilate_kernel, dilate_kernel), dtype=np.uint8)
+        edges = cv2.dilate(edges, kernel)
+
+    return edges
+
+
+@torch.no_grad()
+def get_dilated_edge_mask(depth_11hw: torch.Tensor, distance_threshold_px: float = 30.0):
+    assert depth_11hw.ndim == 4 and depth_11hw.shape[0] == 1 and depth_11hw.shape[1] == 1
+    depth_hw_np = depth_11hw.squeeze(0,1).float().cpu().numpy()
+    edges_np = auto_canny_depth_otsu(depth_hw_np)
+
+    dist_from_edges = cv2.distanceTransform(255 - edges_np, cv2.DIST_L2, 5)
+
+    is_near_edge_mask_np = dist_from_edges < distance_threshold_px
+    is_near_edge_mask_11hw = torch.from_numpy(is_near_edge_mask_np).to(depth_11hw.device).unsqueeze(0).unsqueeze(0)
+    assert is_near_edge_mask_11hw.shape == depth_11hw.shape
+    return is_near_edge_mask_11hw
 
 
 if "__main__" == __name__:
@@ -412,6 +474,10 @@ if "__main__" == __name__:
     parser.add_argument("--initialize_ppd_from_timestep", type=int, default=None, help="Timestep to initialize the PPD from")
     parser.add_argument("--max_sds_timestep", type=int, default=None, help="Maximum timestep for the SDS loss")
     parser.add_argument("--align_depth_least_square", action="store_true", help="Whether to align the depth using least square")
+    parser.add_argument("--flip_sign_for_controlnet", action="store_true", help="Whether to flip the sign for the controlnet")
+    parser.add_argument("--depth_loss_away_from_edges_threshold_px", type=int, default=30, help="Threshold in pixels for the depth loss away from edges")
+    parser.add_argument("--use_synthetic_conditioning_probability", type=float, default=1.0, help="Probability of using synthetic conditioning (for PPD_controlnet)")
+    parser.add_argument("--forward_diffuse_from_initial_pred_depth_probability", type=float, default=1.0, help="Probability of using initial pred depth for forward diffusion. Only used if forward_diffuse_from is initial_pred_depth.")
 
     args = parser.parse_args()
 
@@ -989,7 +1055,7 @@ if "__main__" == __name__:
     # because the loss is not present in all batches
     # and when it is, it might appear more times in one batch than another
 
-    conditioning_kinds = ["no_cond","cond", "all"]
+    conditioning_kinds = ["no_cond","cond", "all","synthetic"]
     loss_keys = ["total","sds","depth","initial_depth","depth_mse","initial_depth_mse","depth_aligned_mse","final_generation_depth_aligned_mse"]
 
     # initialize EMA buffers at 0
@@ -1527,8 +1593,6 @@ if "__main__" == __name__:
                     # and blur it
                     # then perform simple diffusion towards the rescaled depth map!
 
-                    conditioning_kind = "cond"
-
                     def blur(x_11hw, scale_factor):
                         if args.gaussian_blur:
                             return TV_F.gaussian_blur(x_11hw, kernel_size=2*(scale_factor//2)+1, sigma=scale_factor/2)
@@ -1544,7 +1608,7 @@ if "__main__" == __name__:
                             return blur(x_11hw, args.blur_unidepth_output_ratio)
                         else:
                             return x_11hw
-                            
+
                     # infer ppd
                     with torch.no_grad():
                         cond = rgb - 0.5
@@ -1560,6 +1624,9 @@ if "__main__" == __name__:
                                 pred = unwrapped_frozen_denoiser(x=input, semantics=semantics, timestep=timestep)
                                 latent = unwrapped_student_denoiser.sampler.step(pred=pred, x_t=latent, t=timestep)
                             frozen_pred_depth = latent + 0.5
+
+                    if random.random() < args.use_synthetic_conditioning_probability:
+                        conditioning_kind = "synthetic"
                     
                         # now transform it!
                         transformation_kinds = ["log_rescale"]
@@ -1573,7 +1640,7 @@ if "__main__" == __name__:
                             norm_rescaled_frozen_pred_depth = rescaled_normalize_obj["norm_depth"] * 0.5 + 0.5
 
                             rand_rescale_factor = math.exp(random.uniform(math.log(0.1), math.log(1.0))) # uniform in log space
-                            rand_sign_change = random.choice([1, -1])
+                            rand_sign_change = random.choice([1, -1]) if args.flip_sign_for_controlnet else 1
                             rand_bias = random.uniform(-0.1, 0.1)
                             norm_rescaled_frozen_pred_depth = norm_rescaled_frozen_pred_depth * rand_rescale_factor * rand_sign_change + rand_bias
 
@@ -1582,17 +1649,55 @@ if "__main__" == __name__:
                         
                         # now blur it!
                         blurred_norm_rescaled_frozen_pred_depth = maybe_blur(norm_rescaled_frozen_pred_depth)
+
+                        target_depth = norm_rescaled_frozen_pred_depth
+                        blurred_target_depth = blurred_norm_rescaled_frozen_pred_depth
+                    else:
+                        conditioning_kind = "cond"
+                        target_depth = norm_base_depth
+                        blurred_target_depth = maybe_blur(norm_base_depth)
                     
                     # now perform simple diffusion towards the rescaled depth map!
                     timestep = unwrapped_student_denoiser.sampling_timesteps[random.randrange(0, len(unwrapped_student_denoiser.sampling_timesteps))]
 
-                    x0 = norm_rescaled_frozen_pred_depth - 0.5
+                    x0 = None
+
+                    forward_diffuse_from = None
+                    if args.forward_diffuse_from == "initial_pred_depth":
+                        if random.random() < args.forward_diffuse_from_initial_pred_depth_probability:
+                            forward_diffuse_from = "initial_pred_depth"
+                        else:
+                            forward_diffuse_from = "base_pred_depth"
+                    elif args.forward_diffuse_from == "base_pred_depth":
+                        forward_diffuse_from = "base_pred_depth"
+                    else:
+                        raise ValueError(f"Unknown 'forward diffuse from' setting: {args.forward_diffuse_from}")
+
+                    if forward_diffuse_from == "initial_pred_depth":
+                        with torch.no_grad():
+
+                            noise = torch.randn_like(target_depth)
+                            latent = noise
+                            cond_inputs = [
+                                torch.cat([target_depth - 0.5, cond], dim=1),
+                                torch.cat([frozen_pred_depth - 0.5, cond], dim=1),
+                            ]
+                            for timestep in unwrapped_student_denoiser.sampling_timesteps:
+                                student_dit_input = torch.cat([noise, cond], dim=1)
+                                pred_velocity = student_denoiser(x=student_dit_input, conds=cond_inputs, semantics=semantics, timestep=timestep)
+                                latent = unwrapped_student_denoiser.sampler.step(pred=pred_velocity, x_t=latent, t=timestep)
+                            x0 = latent
+                    elif forward_diffuse_from == "base_pred_depth":
+                        x0 = target_depth - 0.5
+                    else:
+                        raise ValueError(f"Unknown 'forward diffuse from' setting: {args.forward_diffuse_from}")
+
                     xT = torch.randn_like(noise)
                     xt = unwrapped_student_denoiser.schedule.forward(x0, xT, timestep)
 
                     student_dit_input = torch.cat([xt, cond], dim=1)
                     cond_inputs = [
-                        torch.cat([blurred_norm_rescaled_frozen_pred_depth - 0.5, cond], dim=1),
+                        torch.cat([target_depth - 0.5, cond], dim=1),
                         torch.cat([frozen_pred_depth - 0.5, cond], dim=1),
                     ]
 
@@ -1601,8 +1706,24 @@ if "__main__" == __name__:
                         student_pred_depth_latent, _ = unwrapped_student_denoiser.schedule.convert_from_pred(student_pred_depth_latent_velocity, 'velocity', xt, timestep)
                         student_pred_depth = student_pred_depth_latent + 0.5
                     
-                    depth_loss = F.mse_loss(student_pred_depth, norm_rescaled_frozen_pred_depth, reduction="mean")
-                    sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
+                    is_far_from_edges_mask = torch.logical_not(get_dilated_edge_mask(frozen_pred_depth, distance_threshold_px=args.depth_loss_away_from_edges_threshold_px))
+                    assert is_far_from_edges_mask.shape == student_pred_depth.shape
+
+                    if conditioning_kind == "synthetic":
+                        depth_loss = F.mse_loss(student_pred_depth, target_depth, reduction="mean")
+                        sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
+
+                    elif conditioning_kind == "cond":
+                        # let's not compute loss near the edges
+                        # only in the middle of big, flat surfaces etc.
+                        # let's just use a canny edge map for this
+
+                        l1_error = l1_loss(student_pred_depth, target_depth, is_far_from_edges_mask)
+
+                        depth_loss = l1_error
+                        sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
+                    else:
+                        raise ValueError(f"Unknown conditioning kind: {conditioning_kind}")
 
                     # set variables needed for logging+visualization
                     depth_mse = depth_loss
@@ -1611,14 +1732,14 @@ if "__main__" == __name__:
                     
                     with torch.no_grad():
                         final_pred_depth_aligned, _, _ = align_depth_least_square(
-                            gt_arr=norm_rescaled_frozen_pred_depth.detach().float().cpu().numpy(),
+                            gt_arr=target_depth.detach().float().cpu().numpy(),
                             pred_arr=student_pred_depth.detach().float().cpu().numpy(),
                             valid_mask_arr=torch.ones_like(student_pred_depth).detach().bool().cpu().numpy(),
                             return_scale_shift=True,
                             max_resolution=None,
                         )
                         final_pred_depth_aligned = torch.from_numpy(final_pred_depth_aligned).to(device)
-                        final_aligned_depth_mse = F.mse_loss(final_pred_depth_aligned, norm_rescaled_frozen_pred_depth, reduction="mean")
+                        final_aligned_depth_mse = F.mse_loss(final_pred_depth_aligned, target_depth, reduction="mean")
                         
                         final_generation_aligned_depth_mse = final_aligned_depth_mse
 
@@ -1651,20 +1772,27 @@ if "__main__" == __name__:
                             # base_depth_colored = colorize_internal(norm_base_depth.float().cpu().numpy(), norm_base_depth.min().item(), norm_base_depth.max().item(), cmap="coolwarm")
                             # base_depth_colored.save("/tmp/viz/base_depth.png")
 
-                            initial_depth_colored = colorize_internal(frozen_pred_depth.cpu().numpy(), frozen_pred_depth.min().item(), frozen_pred_depth.max().item(), cmap="coolwarm")
+                            initial_depth_colored = colorize_internal(frozen_pred_depth.float().cpu().numpy(), frozen_pred_depth.float().min().item(), frozen_pred_depth.float().max().item(), cmap="coolwarm")
                             initial_depth_colored.save("/tmp/viz/initial_depth.png")
 
-                            norm_rescaled_frozen_pred_depth_colored = colorize_internal(norm_rescaled_frozen_pred_depth.cpu().numpy(), norm_rescaled_frozen_pred_depth.min().item(), norm_rescaled_frozen_pred_depth.max().item(), cmap="coolwarm")
-                            norm_rescaled_frozen_pred_depth_colored.save("/tmp/viz/norm_rescaled_frozen_pred_depth.png")
+                            target_depth_colored = colorize_internal(target_depth.float().cpu().numpy(), target_depth.float().min().item(), target_depth.float().max().item(), cmap="coolwarm")
+                            target_depth_colored.save("/tmp/viz/target_depth.png")
 
-                            blurred_norm_rescaled_frozen_pred_depth_colored = colorize_internal(blurred_norm_rescaled_frozen_pred_depth.cpu().numpy(), blurred_norm_rescaled_frozen_pred_depth.min().item(), blurred_norm_rescaled_frozen_pred_depth.max().item(), cmap="coolwarm")
-                            blurred_norm_rescaled_frozen_pred_depth_colored.save("/tmp/viz/blurred_norm_rescaled_frozen_pred_depth.png")
+                            blurred_target_depth_colored = colorize_internal(blurred_target_depth.float().cpu().numpy(), blurred_target_depth.float().min().item(), blurred_target_depth.float().max().item(), cmap="coolwarm")
+                            blurred_target_depth_colored.save("/tmp/viz/blurred_target_depth.png")
 
-                            diff = blurred_norm_rescaled_frozen_pred_depth - norm_rescaled_frozen_pred_depth
+                            diff = (student_pred_depth - target_depth).abs().float()
                             diff_colored = colorize_internal(diff.cpu().numpy(), diff.min().item(), diff.max().item(), cmap="coolwarm")
                             diff_colored.save("/tmp/viz/diff.png")
 
-                            final_depth_colored = colorize_internal(student_pred_depth.cpu().numpy(), student_pred_depth.min().item(), student_pred_depth.max().item(), cmap="coolwarm")
+                            diff_far_from_edges = (student_pred_depth - target_depth).abs().float() * is_far_from_edges_mask.float()
+                            diff_far_from_edges_colored = colorize_internal(diff_far_from_edges.cpu().numpy(), diff_far_from_edges.min().item(), diff_far_from_edges.max().item(), cmap="coolwarm")
+                            diff_far_from_edges_colored.save("/tmp/viz/diff_far_from_edges.png")
+
+                            is_far_from_edges_mask_colored = colorize_internal(is_far_from_edges_mask.float().cpu().numpy(), 0.0, 1.0, cmap="coolwarm")
+                            is_far_from_edges_mask_colored.save("/tmp/viz/is_far_from_edges_mask.png")
+
+                            final_depth_colored = colorize_internal(student_pred_depth.float().cpu().numpy(), student_pred_depth.float().min().item(), student_pred_depth.float().max().item(), cmap="coolwarm")
                             final_depth_colored.save("/tmp/viz/final_depth.png")
 
                             # frozen_denoiser_pred_depth_colored = colorize_internal(frozen_denoiser_pred_depth.cpu().numpy(), frozen_denoiser_pred_depth.min().item(), frozen_denoiser_pred_depth.max().item(), cmap="coolwarm")
@@ -1677,9 +1805,11 @@ if "__main__" == __name__:
                             # let's concatenate them vertically!
                             concatenated = np.concatenate([np.array(img) for img in [
                                 initial_depth_colored,
-                                norm_rescaled_frozen_pred_depth_colored,
-                                blurred_norm_rescaled_frozen_pred_depth_colored,
+                                target_depth_colored,
+                                blurred_target_depth_colored,
                                 diff_colored,
+                                diff_far_from_edges_colored,
+                                is_far_from_edges_mask_colored,
                                 final_depth_colored,
                                 rgb_img,
                             ]],axis=0)
