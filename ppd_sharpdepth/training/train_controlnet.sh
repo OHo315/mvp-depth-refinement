@@ -18,16 +18,17 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --depth_weight 0.4 \
     --base_ckpt_dir andrew-healey/sharpdepth \
     --student_ckpt_dir andrew-healey/sharpdepth \
+    --student_ckpt_dir_revision reverse-simple-transformation \
     --add_datetime_prefix \
     --report_to wandb \
     --mixed_precision bf16 \
     --seed 42 \
     --allow_tf32 \
-    --learning_rate 1e-5 \
+    --learning_rate 1e-6 \
     --lr_scheduler cosine \
     --lr_warmup_steps 100 \
     --tracker_project_name ppd_sharpdepth_controlnet_train \
-    --wandb_name "controlnet_8_gpus_lr_1e-5_no_flip_sign" \
+    --wandb_name "controlnet_8_gpus_lr_1e-6" \
     --set_grads_to_none \
     --checkpointing_steps 500 \
     --validation_steps 200 \
@@ -49,5 +50,5 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --depth_loss_away_from_edges_threshold_px 16 \
     --forward_diffuse_from initial_pred_depth \
     --forward_diffuse_from_initial_pred_depth_probability 0.25 \
-    --use_synthetic_conditioning_probability 1.0 \
+    --use_synthetic_conditioning_probability 0.25 \
     "$@"
