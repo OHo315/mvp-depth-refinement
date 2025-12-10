@@ -1593,6 +1593,8 @@ if "__main__" == __name__:
                     # and blur it
                     # then perform simple diffusion towards the rescaled depth map!
 
+                    norm_base_depth = norm_base_depth * 0.5 + 0.5 # normalize to [0, 1]
+
                     def blur(x_11hw, scale_factor):
                         if args.gaussian_blur:
                             return TV_F.gaussian_blur(x_11hw, kernel_size=2*(scale_factor//2)+1, sigma=scale_factor/2)
@@ -1682,10 +1684,10 @@ if "__main__" == __name__:
                                 torch.cat([target_depth - 0.5, cond], dim=1),
                                 torch.cat([frozen_pred_depth - 0.5, cond], dim=1),
                             ]
-                            for timestep in unwrapped_student_denoiser.sampling_timesteps:
-                                student_dit_input = torch.cat([noise, cond], dim=1)
-                                pred_velocity = student_denoiser(x=student_dit_input, conds=cond_inputs, semantics=semantics, timestep=timestep)
-                                latent = unwrapped_student_denoiser.sampler.step(pred=pred_velocity, x_t=latent, t=timestep)
+                            for loop_timestep in unwrapped_student_denoiser.sampling_timesteps:
+                                student_dit_input = torch.cat([latent, cond], dim=1)
+                                pred_velocity = student_denoiser(x=student_dit_input, conds=cond_inputs, semantics=semantics, timestep=loop_timestep)
+                                latent = unwrapped_student_denoiser.sampler.step(pred=pred_velocity, x_t=latent, t=loop_timestep)
                             x0 = latent
                     elif forward_diffuse_from == "base_pred_depth":
                         x0 = target_depth - 0.5
@@ -1711,19 +1713,27 @@ if "__main__" == __name__:
 
                     if conditioning_kind == "synthetic":
                         depth_loss = F.mse_loss(student_pred_depth, target_depth, reduction="mean")
-                        sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
+                        # sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
 
                     elif conditioning_kind == "cond":
                         # let's not compute loss near the edges
                         # only in the middle of big, flat surfaces etc.
                         # let's just use a canny edge map for this
 
-                        l1_error = l1_loss(student_pred_depth, target_depth, is_far_from_edges_mask)
+                        # l1_error = l1_loss(student_pred_depth, target_depth, is_far_from_edges_mask)
 
-                        depth_loss = l1_error
-                        sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
+                        depth_loss = F.mse_loss(student_pred_depth * is_far_from_edges_mask, target_depth.float() * is_far_from_edges_mask, reduction="mean").to(weight_dtype) / (is_far_from_edges_mask.float().mean() + 1e-6)
+                        # sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
                     else:
                         raise ValueError(f"Unknown conditioning kind: {conditioning_kind}")
+
+                    # let's just use an edge loss as our sds loss.
+                    high_frequency_initial_depth = initial_depth - blur(initial_depth, args.edge_loss_blur_radius)
+                    high_frequency_student_pred_depth = student_pred_depth - blur(student_pred_depth, args.edge_loss_blur_radius)
+
+                    is_near_edge_mask = torch.logical_not(is_far_from_edges_mask)
+                    edge_loss = F.mse_loss(high_frequency_initial_depth * is_near_edge_mask, high_frequency_student_pred_depth * is_near_edge_mask, reduction="mean").to(weight_dtype) / (is_near_edge_mask.float().mean() + 1e-6)
+                    sds_loss = edge_loss
 
                     # set variables needed for logging+visualization
                     depth_mse = depth_loss
@@ -1788,6 +1798,10 @@ if "__main__" == __name__:
                             diff_far_from_edges = (student_pred_depth - target_depth).abs().float() * is_far_from_edges_mask.float()
                             diff_far_from_edges_colored = colorize_internal(diff_far_from_edges.cpu().numpy(), diff_far_from_edges.min().item(), diff_far_from_edges.max().item(), cmap="coolwarm")
                             diff_far_from_edges_colored.save("/tmp/viz/diff_far_from_edges.png")
+
+                            high_frequency_diff_near_edges = (high_frequency_initial_depth - high_frequency_student_pred_depth).abs().float() * is_near_edge_mask.float()
+                            high_frequency_diff_near_edges_colored = colorize_internal(high_frequency_diff_near_edges.cpu().numpy(), high_frequency_diff_near_edges.min().item(), high_frequency_diff_near_edges.max().item(), cmap="coolwarm")
+                            high_frequency_diff_near_edges_colored.save("/tmp/viz/high_frequency_diff_near_edges.png")
 
                             is_far_from_edges_mask_colored = colorize_internal(is_far_from_edges_mask.float().cpu().numpy(), 0.0, 1.0, cmap="coolwarm")
                             is_far_from_edges_mask_colored.save("/tmp/viz/is_far_from_edges_mask.png")
