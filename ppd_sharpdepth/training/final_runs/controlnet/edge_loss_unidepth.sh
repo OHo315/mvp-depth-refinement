@@ -47,8 +47,9 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --gradient_checkpointing \
     --log_depth_maps \
     --depth_loss_away_from_edges_threshold_px 16 \
+    --edge_loss_blur_radius_px 8 \
     --forward_diffuse_from initial_pred_depth \
-    --forward_diffuse_from_initial_pred_depth_probability 0.125 \
+    --forward_diffuse_from_initial_pred_depth_probability 0.25 \
     --use_synthetic_conditioning_probability 0.25 \
     --use_edge_loss_as_sds_loss \
     --wandb_name "controlnet_edge_loss_unidepth" \

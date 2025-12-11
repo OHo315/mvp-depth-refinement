@@ -1754,8 +1754,8 @@ if "__main__" == __name__:
 
                     if conditioning_kind == "synthetic":
                         depth_loss = F.mse_loss(student_pred_depth, target_depth, reduction="mean")
-                        sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
-                        # sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
+                        edge_loss = F.mse_loss(high_frequency_initial_depth * is_near_edge_mask, high_frequency_student_pred_depth * is_near_edge_mask, reduction="mean").to(weight_dtype) / (is_near_edge_mask.float().mean() + 1e-6)
+                        sds_loss = edge_loss
 
                     elif conditioning_kind == "cond":
 
