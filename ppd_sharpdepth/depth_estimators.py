@@ -71,6 +71,7 @@ ModelArchitecture = Enum(
             "pixelperfectdepth",
             "unidepth",
             "patchrefiner",
+            "zoedepth",
             #"lotus",
         ]
     )
@@ -389,6 +390,28 @@ def get_depth_estimator_fn(
                 # print(f"Input to pixel perfect depth. shape: {raw_image_hwc.shape}, std: {raw_image_hwc.std()}, mean: {raw_image_hwc.mean()}, dtype: {raw_image_hwc.dtype}")
                 # print(f"Resized output from pixel perfect depth. shape: {depth_11hw.shape}, std: {depth_11hw.std()}, mean: {depth_11hw.mean()}, dtype: {depth_11hw.dtype}")
                 # raise NotImplementedError("Pixel Perfect Depth is not implemented yet")
+        
+        case ModelArchitecture.zoedepth:
+            import torch.hub
+
+            torch.hub.help("intel-isl/MiDaS", "DPT_BEiT_L_384", force_reload=False)
+            zoedepth_n = torch.hub.load("isl-org/ZoeDepth", "ZoeD_N", pretrained=True)
+
+            @torch.autocast(device_type=device.type, dtype=float_dtype)
+            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor], internal=False):
+                rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
+                depth_11hw = zoedepth_n.infer(rgb_float_1chw_resized)
+
+                if internal:
+                    return depth_11hw
+
+                image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
+                base_pred = image_processor.unpad_image(depth_11hw, padding)  # [N*E,1,PH,PW]
+                base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+                base_pred = base_pred.squeeze().float()
+
+                ret_11hw = base_pred
+                return ret_11hw
 
         case ModelArchitecture.patchrefiner:
             from .patchrefiner.estimator.models.patchrefiner import PatchRefiner
