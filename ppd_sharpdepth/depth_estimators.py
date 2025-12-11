@@ -392,10 +392,13 @@ def get_depth_estimator_fn(
                 # raise NotImplementedError("Pixel Perfect Depth is not implemented yet")
         
         case ModelArchitecture.zoedepth:
-            import torch.hub
-
-            torch.hub.help("intel-isl/MiDaS", "DPT_BEiT_L_384", force_reload=False)
-            zoedepth_n = torch.hub.load("isl-org/ZoeDepth", "ZoeD_N", pretrained=True)
+            
+            try:
+                zoedepth_n = torch.hub.load("isl-org/ZoeDepth", "ZoeD_N", pretrained=True)
+            except Exception as e:
+                torch.hub.help("intel-isl/MiDaS", "DPT_BEiT_L_384", force_reload=False)
+                zoedepth_n = torch.hub.load("isl-org/ZoeDepth", "ZoeD_N", pretrained=True)
+            zoedepth_n = zoedepth_n.to(device).eval()
 
             @torch.autocast(device_type=device.type, dtype=float_dtype)
             def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor], internal=False):

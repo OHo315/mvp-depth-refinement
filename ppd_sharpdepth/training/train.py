@@ -479,6 +479,8 @@ if "__main__" == __name__:
     parser.add_argument("--use_synthetic_conditioning_probability", type=float, default=1.0, help="Probability of using synthetic conditioning (for PPD_controlnet)")
     parser.add_argument("--forward_diffuse_from_initial_pred_depth_probability", type=float, default=1.0, help="Probability of using initial pred depth for forward diffusion. Only used if forward_diffuse_from is initial_pred_depth.")
     parser.add_argument("--edge_loss_blur_radius_px", type=int, default=8, help="Radius in pixels for the edge loss blur")
+    parser.add_argument("--use_edge_loss_as_sds_loss", action="store_true", help="Whether to use the edge loss as the SDS loss")
+    parser.add_argument("--use_sharpdepth_style_losses", action="store_true", help="Whether to use the sharpdepth style losses")
 
     args = parser.parse_args()
 
@@ -902,6 +904,8 @@ if "__main__" == __name__:
                 return "LiheYoung/depth_anything_vitl14"
             case ModelArchitecture.pixelperfectdepth:
                 return "andrew-healey/sharpdepth"
+            case ModelArchitecture.zoedepth:
+                return "isl-org/ZoeDepth"
             case _:
                 raise ValueError(f"Invalid model architecture: {model_architecture}")
 
@@ -1390,21 +1394,30 @@ if "__main__" == __name__:
                         cond = rgb - 0.5
                         noise = torch.randn(size=[cond.shape[0], 1, cond.shape[2], cond.shape[3]]).to(device)
 
-                        if args.initialize_ppd_from_timestep is not None:
+                        if args.initialize_ppd_from_timestep is not None and forward_diffuse_from == ForwardDiffuseFrom.INITIAL_PRED_DEPTH:
                             timesteps = torch.tensor([timestep for timestep in unwrapped_student_denoiser.sampling_timesteps if timestep <= args.initialize_ppd_from_timestep],device=device,dtype=weight_dtype)
                             latent = unwrapped_student_denoiser.schedule.forward(norm_base_depth - 0.5, noise, torch.tensor(args.initialize_ppd_from_timestep,device=device,dtype=weight_dtype))
                         else:
                             timesteps = torch.tensor(unwrapped_student_denoiser.sampling_timesteps,device=device,dtype=weight_dtype)
                             latent = noise
 
-                        with torch.autocast(device.type,dtype=weight_dtype):
-                            semantics = unwrapped_frozen_denoiser.semantics_prompt(rgb)
-                            noisy_depth_cond = (norm_base_depth - 0.5) if args.use_conditioning_for_initial_ppd else torch.randn_like(latent)
-                            for timestep in timesteps:
-                                input = torch.cat([latent, cond, noisy_depth_cond], dim=1)
-                                pred = student_denoiser(x=input, semantics=semantics, timestep=timestep)
-                                latent = unwrapped_student_denoiser.sampler.step(pred=pred, x_t=latent, t=timestep)
-                            frozen_pred_depth = latent + 0.5
+                        if forward_diffuse_from == ForwardDiffuseFrom.INITIAL_PRED_DEPTH:
+                            with torch.autocast(device.type,dtype=weight_dtype):
+                                semantics = unwrapped_frozen_denoiser.semantics_prompt(rgb)
+                                noisy_depth_cond = (norm_base_depth - 0.5) if args.use_conditioning_for_initial_ppd else torch.randn_like(latent)
+                                for timestep in timesteps:
+                                    input = torch.cat([latent, cond, noisy_depth_cond], dim=1)
+                                    pred = student_denoiser(x=input, semantics=semantics, timestep=timestep)
+                                    latent = unwrapped_student_denoiser.sampler.step(pred=pred, x_t=latent, t=timestep)
+                                frozen_pred_depth = latent + 0.5
+                        else:
+                            with torch.autocast(device.type,dtype=weight_dtype):
+                                semantics = unwrapped_frozen_denoiser.semantics_prompt(rgb)
+                                for timestep in timesteps:
+                                    input = torch.cat([latent, cond], dim=1)
+                                    pred = frozen_denoiser(x=input, semantics=semantics, timestep=timestep)
+                                    latent = unwrapped_frozen_denoiser.sampler.step(pred=pred, x_t=latent, t=timestep)
+                                frozen_pred_depth = latent + 0.5
                     
                         l1_error = torch.abs(frozen_pred_depth - norm_base_depth)
                         l1_error = l1_error / l1_error.max()
@@ -1465,8 +1478,20 @@ if "__main__" == __name__:
 
                     # let's do sds loss only in the regions with low l1 error 
 
-                    high_freq_sds_score_vector = score_vector#(score_vector - maybe_blur(score_vector)).abs() * ((1-maybe_blur(l1_error))**2)
-                    sds_loss = 0.5 * F.mse_loss(student_pred_depth_latent.float(), (student_pred_depth_latent.float() - high_freq_sds_score_vector.float()).detach().float(), reduction="mean")
+                    if args.use_edge_loss_as_sds_loss:
+                        assert forward_diffuse_from == ForwardDiffuseFrom.INITIAL_PRED_DEPTH, "Edge loss as SDS loss is only supported for initial pred depth, b/c we can only use the frozen_pred_depth edges as a pseudo-ground truth when it's the real ppd base depth"
+
+                        high_frequency_frozen_pred_depth = frozen_pred_depth - maybe_blur(frozen_pred_depth)
+                        high_frequency_student_pred_depth = student_pred_depth_latent - maybe_blur(student_pred_depth_latent)
+                        
+                        is_near_edge_mask = get_dilated_edge_mask(frozen_pred_depth, distance_threshold_px=args.edge_loss_blur_radius_px)
+                        edge_loss = F.mse_loss(high_frequency_frozen_pred_depth * is_near_edge_mask, high_frequency_student_pred_depth * is_near_edge_mask, reduction="mean").to(weight_dtype) / (is_near_edge_mask.float().mean() + 1e-6)
+                        sds_loss = edge_loss
+
+                    else:
+
+                        high_freq_sds_score_vector = score_vector#(score_vector - maybe_blur(score_vector)).abs() * ((1-maybe_blur(l1_error))**2)
+                        sds_loss = 0.5 * F.mse_loss(student_pred_depth_latent.float(), (student_pred_depth_latent.float() - high_freq_sds_score_vector.float()).detach().float(), reduction="mean")
 
                     if accelerator.is_main_process and args.log_depth_maps and step % 10 == 0:
                         with torch.no_grad():
@@ -1527,9 +1552,19 @@ if "__main__" == __name__:
                             
                     maybe_blur_depth_loss = lambda x: maybe_blur(x) if args.blur_depth_loss else x
 
-                    depth_loss = l1_loss(
-                        maybe_blur_depth_loss(student_pred_depth_latent + 0.5), maybe_blur_depth_loss(target_latent + 0.5), torch.ones_like(l1_error)
-                    )
+                    if args.use_edge_loss_as_sds_loss:
+                        is_far_from_edges_mask = torch.logical_not(get_dilated_edge_mask(frozen_pred_depth, distance_threshold_px=args.depth_loss_away_from_edges_threshold_px))
+                        assert is_far_from_edges_mask.shape == student_pred_depth.shape
+
+                        depth_loss = l1_loss(
+                            maybe_blur_depth_loss(student_pred_depth_latent + 0.5) * is_far_from_edges_mask, maybe_blur_depth_loss(target_latent + 0.5) * is_far_from_edges_mask, is_far_from_edges_mask.to(torch.bool)
+                        )
+
+                    else:
+                        depth_loss = l1_loss(
+                            maybe_blur_depth_loss(student_pred_depth_latent + 0.5), maybe_blur_depth_loss(target_latent + 0.5), torch.ones_like(l1_error)
+                        )
+
                     depth_mse = F.mse_loss(student_pred_depth_latent + 0.5, target_latent + 0.5, reduction="mean")
 
                     with torch.no_grad():
@@ -1712,29 +1747,52 @@ if "__main__" == __name__:
                     is_far_from_edges_mask = torch.logical_not(get_dilated_edge_mask(frozen_pred_depth, distance_threshold_px=args.depth_loss_away_from_edges_threshold_px))
                     assert is_far_from_edges_mask.shape == student_pred_depth.shape
 
-                    if conditioning_kind == "synthetic":
-                        depth_loss = F.mse_loss(student_pred_depth, target_depth, reduction="mean")
-                        # sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
-
-                    elif conditioning_kind == "cond":
-                        # let's not compute loss near the edges
-                        # only in the middle of big, flat surfaces etc.
-                        # let's just use a canny edge map for this
-
-                        # l1_error = l1_loss(student_pred_depth, target_depth, is_far_from_edges_mask)
-
-                        depth_loss = F.mse_loss(student_pred_depth * is_far_from_edges_mask, target_depth.float() * is_far_from_edges_mask, reduction="mean").to(weight_dtype) / (is_far_from_edges_mask.float().mean() + 1e-6)
-                        # sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
-                    else:
-                        raise ValueError(f"Unknown conditioning kind: {conditioning_kind}")
-
                     # let's just use an edge loss as our sds loss.
                     high_frequency_initial_depth = frozen_pred_depth - blur(frozen_pred_depth, args.edge_loss_blur_radius_px)
                     high_frequency_student_pred_depth = student_pred_depth - blur(student_pred_depth, args.edge_loss_blur_radius_px)
-
                     is_near_edge_mask = get_dilated_edge_mask(student_pred_depth, distance_threshold_px=args.edge_loss_blur_radius_px)
-                    edge_loss = F.mse_loss(high_frequency_initial_depth * is_near_edge_mask, high_frequency_student_pred_depth * is_near_edge_mask, reduction="mean").to(weight_dtype) / (is_near_edge_mask.float().mean() + 1e-6)
-                    sds_loss = edge_loss
+
+                    if conditioning_kind == "synthetic":
+                        depth_loss = F.mse_loss(student_pred_depth, target_depth, reduction="mean")
+                        sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
+                        # sds_loss = torch.tensor(0.0, device=device, dtype=weight_dtype)
+
+                    elif conditioning_kind == "cond":
+
+                        # sharpdepth-style losses! l1-weighted depth map and sds loss
+                        if args.use_sharpdepth_style_losses:
+                            l1_error = torch.abs(frozen_pred_depth - target_depth)
+                            depth_loss = l1_loss(
+                                student_pred_depth, target_depth, l1_error
+                            )
+
+                            # now compute sds loss!
+                            available_sds_timesteps = [timestep for timestep in unwrapped_student_denoiser.sampling_timesteps if timestep <= args.max_sds_timestep]
+                            assert len(available_sds_timesteps) == 1, "We only support one SDS timestep for sharpdepth style losses"
+                            sds_timestep = torch.tensor(random.choice(available_sds_timesteps), device=device, dtype=weight_dtype)
+
+                            noise = torch.randn_like(student_pred_depth_latent)
+                            noised_student_pred_depth_latent = unwrapped_student_denoiser.schedule.forward(student_pred_depth_latent, noise, sds_timestep)
+                            with torch.no_grad():
+                                frozen_denoiser_input = torch.cat([noised_student_pred_depth_latent, cond], dim=1)
+                                frozen_denoiser_pred_depth_latent_velocity = frozen_denoiser(frozen_denoiser_input, semantics=semantics, timestep=sds_timestep)
+                                frozen_denoiser_pred_depth_latent, pred_noise = unwrapped_frozen_denoiser.schedule.convert_from_pred(frozen_denoiser_pred_depth_latent_velocity, 'velocity', noised_student_pred_depth_latent, sds_timestep)
+                                frozen_denoiser_pred_depth = frozen_denoiser_pred_depth_latent + 0.5
+
+                                # TODO figure out if the sign should be reversed here
+                            score_vector = (pred_noise.float() - noise.float())
+
+                            sds_loss = 0.5 * F.mse_loss(student_pred_depth_latent.float(), (student_pred_depth_latent.float() - score_vector.float()).detach().float(), reduction="mean")
+
+                        # our custom losses! MSE depth loss far from edges, and *high-frequency* MSE depth loss near edges
+                        else:
+                            depth_loss = F.mse_loss(student_pred_depth * is_far_from_edges_mask, target_depth.float() * is_far_from_edges_mask, reduction="mean").to(weight_dtype) / (is_far_from_edges_mask.float().mean() + 1e-6)
+                            edge_loss = F.mse_loss(high_frequency_initial_depth * is_near_edge_mask, high_frequency_student_pred_depth * is_near_edge_mask, reduction="mean").to(weight_dtype) / (is_near_edge_mask.float().mean() + 1e-6)
+                            sds_loss = edge_loss
+                    else:
+                        raise ValueError(f"Unknown conditioning kind: {conditioning_kind}")
+
+
 
                     # set variables needed for logging+visualization
                     depth_mse = depth_loss
