@@ -14,7 +14,7 @@ gradient_accumulation_steps=$((macrobatch_size / num_gpus))
 # --learning_rate=1e-6 --student_ckpt_dir_revision reverse-simple-transformation
 
 accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
-    --sds_loss_weight 0.0 \
+    --sds_loss_weight 0.1 \
     --depth_weight 0.4 \
     --base_ckpt_dir andrew-healey/sharpdepth \
     --student_ckpt_dir andrew-healey/sharpdepth \
@@ -29,7 +29,7 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --lr_warmup_steps 100 \
     --tracker_project_name ppd_sharpdepth_controlnet_train \
     --set_grads_to_none \
-    --checkpointing_steps 500 \
+    --checkpointing_steps 1000 \
     --validation_steps 200 \
     --train_batch_size 1 \
     --gradient_accumulation_steps $gradient_accumulation_steps \
@@ -37,8 +37,8 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --use_ema \
     --base_data_dir "$WORKSPACE_DIR/data/" \
     --config "$WORKSPACE_DIR/config/train_marigold_depth.yaml" \
-    --output_dir "$WORKSPACE_DIR/train_output/" \
-    --base_model zoedepth \
+    --output_dir "$WORKSPACE_DIR/train_output_edge_loss_unidepth/" \
+    --base_model unidepth \
     --denoiser pixel_perfect_depth_controlnet \
     --use_conditioning_probability 0.8 \
     --dit_patch_encoder_lr_multiplier 1 \
@@ -51,5 +51,5 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --forward_diffuse_from_initial_pred_depth_probability 0.125 \
     --use_synthetic_conditioning_probability 0.25 \
     --use_edge_loss_as_sds_loss \
-    --wandb_name "controlnet" \
+    --wandb_name "controlnet_edge_loss_unidepth" \
     "$@"

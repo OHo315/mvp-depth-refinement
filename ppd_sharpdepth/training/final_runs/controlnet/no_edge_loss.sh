@@ -1,6 +1,7 @@
 #export WORKSPACE_DIR="$(dirname $0)/../.."
 export WORKSPACE_DIR=$BASE_DATA_DIR../
 export PYTHONPATH="$WORKSPACE_DIR":$PYTHONPATH
+export TORCH_HUB_SKIP_VALIDATION=1
 
 echo $WORKSPACE_DIR
 echo $PYTHONPATH
@@ -37,7 +38,7 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --use_ema \
     --base_data_dir "$WORKSPACE_DIR/data/" \
     --config "$WORKSPACE_DIR/config/train_marigold_depth.yaml" \
-    --output_dir "$WORKSPACE_DIR/train_output/" \
+    --output_dir "$WORKSPACE_DIR/train_output_no_edge_loss/" \
     --base_model zoedepth \
     --denoiser pixel_perfect_depth_controlnet \
     --use_conditioning_probability 0.8 \
@@ -51,5 +52,5 @@ accelerate launch --num_processes $num_gpus ppd_sharpdepth/training/train.py \
     --forward_diffuse_from_initial_pred_depth_probability 0.125 \
     --use_synthetic_conditioning_probability 0.25 \
     --use_edge_loss_as_sds_loss \
-    --wandb_name "controlnet" \
+    --wandb_name "controlnet_no_edge_loss" \
     "$@"
