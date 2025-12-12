@@ -12,7 +12,6 @@ import gc
 from diffusers import UNet2DConditionModel
 from ppd_sharpdepth.sharpdepth.util.alignment import align_depth_least_square
 from unidepth.models import UniDepthV1
-from zoedepth.models import ZoeDepth
 from zoedepth.models.builder import build_model as zoe_build
 from zoedepth.utils.config import get_config as zoe_config
 from .sharpdepth.data.datasets_and_samplers import get_dataset
@@ -71,8 +70,8 @@ ModelArchitecture = Enum(
             "sharpdepth_ppd_unidepth",
             "depthanythingsmall",
             "depthanythinglarge",
-            "pixelperfectdepth_unidepth",
-            "pixelperfectdepth_zoedepth",
+            "sharpdepth_ppd_unidepth",
+            "sharpdepth_ppd_zoedepth",
             "unidepth",
             "patchrefiner",
             "zoedepth",
