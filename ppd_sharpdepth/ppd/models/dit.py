@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
 
 from .patch_embed import PatchEmbed
 from .mlp import Mlp
@@ -332,8 +333,16 @@ class ControlNetDiT(ModelMixin):
         return x
     
     def requires_grad_(self, value):
+        should_fft = os.environ.get("FFT", "0") == "1"
+        if should_fft:
+            print("Full fine-tuning mode enabled. All parameters will be fine-tuned.")
+        else:
+            print("Partial fine-tuning mode enabled. Only the Dit parameters will be fine-tuned.")
         for param in self.dit.parameters():
-            param.requires_grad = False
+            if should_fft:
+                param.requires_grad = value
+            else:
+                param.requires_grad = False
         for conditioning_dit in self.conditioning_dits:
             for param in conditioning_dit.parameters():
                 param.requires_grad = value

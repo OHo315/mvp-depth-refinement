@@ -71,9 +71,11 @@ ModelArchitecture = Enum(
             "sharpdepth_ppd_unidepth",
             "depthanythingsmall",
             "depthanythinglarge",
-            "pixelperfectdepth",
+            "pixelperfectdepth_unidepth",
+            "pixelperfectdepth_zoedepth",
             "unidepth",
             "patchrefiner",
+            "zoedepth",
             #"lotus",
         ]
     )
@@ -350,7 +352,7 @@ def get_depth_estimator_fn(
                 # print(f"Resized output from depth_anything. shape: {disparity_raw_1hw.shape}, std: {disparity_raw_1hw.std()}, mean: {disparity_raw_1hw.mean()}, dtype: {disparity_raw_1hw.dtype}")
                 # raise NotImplementedError("Depth Anything is not implemented yet")
 
-        case ModelArchitecture.pixelperfectdepth: 
+        case ModelArchitecture.pixelperfectdepth_unidepth: 
 
             #DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR="LiheYoung/depth_anything_vits14"
             #depth_anything_small_fn = get_depth_estimator_fn(
@@ -433,6 +435,105 @@ def get_depth_estimator_fn(
                 # print(f"Input to pixel perfect depth. shape: {raw_image_hwc.shape}, std: {raw_image_hwc.std()}, mean: {raw_image_hwc.mean()}, dtype: {raw_image_hwc.dtype}")
                 # print(f"Resized output from pixel perfect depth. shape: {depth_11hw.shape}, std: {depth_11hw.std()}, mean: {depth_11hw.mean()}, dtype: {depth_11hw.dtype}")
                 # raise NotImplementedError("Pixel Perfect Depth is not implemented yet")
+
+        case ModelArchitecture.pixelperfectdepth_zoedepth: 
+
+            #DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR="LiheYoung/depth_anything_vits14"
+            #depth_anything_small_fn = get_depth_estimator_fn(
+            #    ModelArchitecture.depthanythingsmall,
+            #    device,
+            #    float_dtype,
+            #    DEPTH_ANYTHING_SMALL_CHECKPOINT_DIR
+            #) 
+
+            try:
+                zoedepth_n = torch.hub.load("isl-org/ZoeDepth", "ZoeD_N", pretrained=True)
+            except Exception as e:
+                torch.hub.help("intel-isl/MiDaS", "DPT_BEiT_L_384", force_reload=False)
+                zoedepth_n = torch.hub.load("isl-org/ZoeDepth", "ZoeD_N", pretrained=True)
+            zoedepth_n = zoedepth_n.to(device).eval()
+
+            model = PixelPerfectDepth.from_pretrained(
+                checkpoint_filepath, subfolder="ppd"
+            )
+            model = model.to(device).eval()
+            model.requires_grad_(False)
+
+            @torch.autocast(device_type=device.type, dtype=float_dtype)
+            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor], internal=False):
+                preprocessor = PixelPerfectDepthPreProcessor
+ 
+                rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
+                rgb_int_1chw_resized = (rgb_float_1chw_resized * 255).to(torch.int32)
+
+                #metric_depth_base = depth_anything_small_fn(rgb_int_1chw, preprocessor, internal=True)
+                #metric_depth_base = unidepth_fn(rgb_int_1chw, MarigoldPreProcessor, internal=True)
+                metric_depth_base =  zoedepth_n(rgb_int_1chw.to(float_dtype).to(device), preprocessor, internal=True)["metric_depth"]
+
+                H, W = rgb_float_1chw_resized.squeeze(0).shape[1:3]
+                raw_image_hwc = (
+                    rgb_int_1chw_resized.squeeze(0).permute(1, 2, 0).float().cpu().numpy()
+                )
+                raw_image_hwc_bgr = cv2.cvtColor(
+                    raw_image_hwc, cv2.COLOR_RGB2BGR
+                )  # infer_image() applies a BGR->RGB conversion, so we must first convert from RGB->BGR here
+                depth_raw_11hw, _ = model.infer_image(raw_image_hwc_bgr)
+                depth_11hw = F.interpolate(
+                    depth_raw_11hw, size=(H, W), mode="bilinear", align_corners=False
+                )
+
+                # depth_11hw is in log space
+                # so let's use least-squares to align as closely as possible with log-space metric_depth_base
+                # and then convert it to metric space!
+                metric_depth_base_log_space = torch.log(metric_depth_base + 1)
+                depth_11hw_aligned, _, _ = align_depth_least_square(
+                    gt_arr=metric_depth_base_log_space.detach().float().cpu().numpy(),
+                    pred_arr=depth_11hw.detach().float().cpu().numpy(),
+                    valid_mask_arr=torch.ones_like(depth_11hw).bool().cpu().numpy(),
+                    return_scale_shift=True,
+                    max_resolution=None,
+                )
+                depth_11hw_aligned = torch.from_numpy(depth_11hw_aligned).to(device)
+
+                depth_11hw_aligned = torch.exp(depth_11hw_aligned) - 1
+
+                if internal:
+                    return depth_11hw_aligned
+
+                image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
+                base_pred = image_processor.unpad_image(depth_11hw_aligned, padding)  # [N*E,1,PH,PW]
+                base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+                base_pred = base_pred.squeeze().float()
+
+                ret_11hw = base_pred
+
+                return ret_11hw
+
+        
+        case ModelArchitecture.zoedepth:
+            
+            try:
+                zoedepth_n = torch.hub.load("isl-org/ZoeDepth", "ZoeD_N", pretrained=True)
+            except Exception as e:
+                torch.hub.help("intel-isl/MiDaS", "DPT_BEiT_L_384", force_reload=False)
+                zoedepth_n = torch.hub.load("isl-org/ZoeDepth", "ZoeD_N", pretrained=True)
+            zoedepth_n = zoedepth_n.to(device).eval()
+
+            @torch.autocast(device_type=device.type, dtype=float_dtype)
+            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor], internal=False):
+                rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
+                depth_11hw = zoedepth_n.infer(rgb_float_1chw_resized)
+
+                if internal:
+                    return depth_11hw
+
+                image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
+                base_pred = image_processor.unpad_image(depth_11hw, padding)  # [N*E,1,PH,PW]
+                base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+                base_pred = base_pred.squeeze().float()
+
+                ret_11hw = base_pred
+                return ret_11hw
 
         case ModelArchitecture.patchrefiner:
             from .patchrefiner.estimator.models.patchrefiner import PatchRefiner

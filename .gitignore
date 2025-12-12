@@ -5,7 +5,7 @@ __pycache__
 /preds
 /output
 /viz
-/train_output
+/train_output*
 /checkpoints
 /wandb
 /ppd_sharpdepth/patchrefiner/checkpoints/work_dir
