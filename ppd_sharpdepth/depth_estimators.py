@@ -12,6 +12,9 @@ import gc
 from diffusers import UNet2DConditionModel
 from ppd_sharpdepth.sharpdepth.util.alignment import align_depth_least_square
 from unidepth.models import UniDepthV1
+from zoedepth.models import ZoeDepth
+from zoedepth.models.builder import build_model as zoe_build
+from zoedepth.utils.config import get_config as zoe_config
 from .sharpdepth.data.datasets_and_samplers import get_dataset
 from .sharpdepth.data.datasets_and_samplers.base_depth_dataset import (
     BaseDepthDataset,
@@ -141,16 +144,28 @@ def get_depth_estimator_fn(
                 
                 return ret_11hw
 
-        case ModelArchitecture.sharpdepth_ppd_unidepth:
-
-            #with torch.autocast(device_type="cuda", dtype=torch.bfloat16): 
-            UNIDEPTH_CHECKPOINT_DIR="lpiccinelli/unidepth-v1-vitl14"
-            base_depth_estimator_fn = get_depth_estimator_fn(
-                ModelArchitecture.unidepth, 
-                device, 
-                float_dtype, 
-                UNIDEPTH_CHECKPOINT_DIR
-            )
+        case (ModelArchitecture.sharpdepth_ppd_unidepth
+              | ModelArchitecture.sharpdepth_ppd_zoedepth):
+            
+            match model_architecture:
+                case (ModelArchitecture.sharpdepth_ppd_unidepth):
+                    #with torch.autocast(device_type="cuda", dtype=torch.bfloat16): 
+                    UNIDEPTH_CHECKPOINT_DIR="lpiccinelli/unidepth-v1-vitl14"
+                    base_depth_estimator_fn = get_depth_estimator_fn(
+                        ModelArchitecture.unidepth, 
+                        device, 
+                        float_dtype, 
+                        UNIDEPTH_CHECKPOINT_DIR
+                    )
+                case (ModelArchitecture.sharpdepth_ppd_zoedepth):
+                    #with torch.autocast(device_type="cuda", dtype=torch.bfloat16): 
+                    ZOEDEPTH_CHECKPOINT_DIR="Intel/zoedepth-nyu"
+                    base_depth_estimator_fn = get_depth_estimator_fn(
+                        ModelArchitecture.zoedepth, 
+                        device, 
+                        float_dtype, 
+                        ZOEDEPTH_CHECKPOINT_DIR
+                    )
 
             frozen_unet = PixelPerfectDepth.from_pretrained("andrew-healey/sharpdepth", subfolder="ppd", revision="blurred")
             frozen_unet = frozen_unet.to(device, dtype=float_dtype).eval()
@@ -187,7 +202,7 @@ def get_depth_estimator_fn(
                 ret_11hw = torch.from_numpy(out.depth_np.reshape(1, 1, h, w))
                 
                 return ret_11hw
-
+            
         case ModelArchitecture.unidepth:
 
             unidepth = UniDepthV1.from_pretrained(checkpoint_filepath)
@@ -225,6 +240,35 @@ def get_depth_estimator_fn(
                 # Input to unidepth. shape: torch.Size([1, 3, 728, 768]), std: 0.32351335883140564, mean: 0.34626907110214233, dtype: torch.float32
                 # Output from unidepth. shape: torch.Size([1, 1, 728, 768]), std: 0.360894113779068, mean: 1.302354335784912, dtype: torch.float32
 
+        case ModelArchitecture.zoedepth:
+            path = hf_hub_download(repo_id=checkpoint_filepath, filename="model.safetensors")
+            conf = zoe_config("zoedepth_nyu")
+            zoedepth = zoe_build(conf)
+            zoedepth.load_state_dict(torch.load(path))
+            zoedepth = zoedepth.to(device, dtype=float_dtype)
+            zoedepth.requires_grad_(False)
+
+            @torch.autocast(device_type=device.type, dtype=float_dtype)
+            def depth_estimator_fn(rgb_int_1chw: torch.Tensor, preprocessor: Type[PreProcessor], internal=False):
+                
+                rgb_float_1chw_resized, padding, original_resolution = preprocessor.run(rgb_int_1chw, device, float_dtype)
+
+                base_pred = zoedepth.infer(
+                    (rgb_float_1chw_resized * 255).squeeze().int()
+                )["depth"]
+
+                if internal:
+                    #ret_11hw = torch.from_numpy(base_pred)
+                    return base_pred
+
+                image_processor = MarigoldImageProcessor(vae_scale_factor=8, do_normalize=False)
+                base_pred = image_processor.unpad_image(base_pred, padding)  # [N*E,1,PH,PW]
+                base_pred = image_processor.resize_antialias(base_pred, original_resolution, mode="bilinear", is_aa=False)  # [N,1,H,W]
+                base_pred = base_pred.squeeze().float().cpu().numpy()
+
+                ret_11hw = torch.from_numpy(base_pred)
+
+                return ret_11hw
         case (
             ModelArchitecture.depthanythingsmall | ModelArchitecture.depthanythinglarge
         ): 

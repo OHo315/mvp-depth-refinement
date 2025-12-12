@@ -20,3 +20,6 @@
 [submodule "submodules/PatchRefiner"]
 	path = submodules/PatchRefiner
 	url = git@github.com:OHo315/PatchRefiner
+[submodule "submodules/ZoeDepth"]
+	path = submodules/ZoeDepth
+	url = https://github.com/isl-org/ZoeDepth
